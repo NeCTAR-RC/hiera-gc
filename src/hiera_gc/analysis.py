@@ -120,6 +120,10 @@ def analyse(config: RunConfig,
     result.inventory = inventory
     result.scopes = scopes
     result.indexes = indexes
+
+    from hiera_gc.checks import run_checks
+    run_checks(result)
+
     result.stats.update({
         "environments": len(environments),
         "data_files": inventory.files_scanned,
