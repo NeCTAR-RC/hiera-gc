@@ -30,6 +30,7 @@ class AnalysisResult:
     warnings: List[Warn] = field(default_factory=list)
     stats: Dict[str, int] = field(default_factory=dict)
     # Populated by analyse() for the later analysis passes.
+    config: object = None
     inventory: object = None
     scopes: Dict[str, "object"] = field(default_factory=dict)
     indexes: Dict[str, "object"] = field(default_factory=dict)
@@ -86,6 +87,7 @@ def analyse(config: RunConfig,
     from hiera_gc.scope import build_scope
 
     result = AnalysisResult(environments=[e.name for e in environments])
+    result.config = config
     inventory = build_inventory(config, environments)
     cache = ExtractorCache()
 
