@@ -188,5 +188,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     return EXIT_CLEAN
 
 
+def entry() -> None:
+    """Entry point for the zipapp build; propagates the exit code."""
+    sys.exit(main())
+
+
 if __name__ == "__main__":
     sys.exit(main())

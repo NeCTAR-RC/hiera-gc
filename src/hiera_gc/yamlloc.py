@@ -67,6 +67,9 @@ def load_data_file(path: Path) -> LoadedDoc:
             line=(mark.line + 1) if mark else 0)
 
     doc = LoadedDoc(file=path)
+    roots = [r for r in roots
+             if not (isinstance(r, yaml.ScalarNode)
+                     and r.tag == "tag:yaml.org,2002:null")]
     if not roots:
         doc.problems.append("empty data file")
         return doc

@@ -115,3 +115,9 @@ def test_iter_string_scalars(tmp_path):
     assert "plain" in strings
     assert "quoted %{lookup('x')}" in strings
     assert "42" not in strings  # int scalar, not a string
+
+
+def test_null_document_is_empty(tmp_path):
+    doc = load_data_file(write(tmp_path, "n.yaml", "---\n"))
+    assert doc.problems == ["empty data file"]
+    assert doc.keys == []
