@@ -15,7 +15,7 @@ from hiera_gc.consumers.pp_tokens import Token
 
 LOOKUP_FUNCS = {"lookup", "hiera", "hiera_array", "hiera_hash",
                 "hiera_include"}
-MERGING_FUNCS = {"hiera_array", "hiera_hash"}
+MERGING_FUNCS = {"hiera_array", "hiera_hash", "hiera_include"}
 INTERP_IN_STRING = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_:][\w:]*")
 OPEN = {"(", "[", "{"}
 CLOSE = {")", "]", "}"}

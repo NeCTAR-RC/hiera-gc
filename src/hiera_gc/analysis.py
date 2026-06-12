@@ -122,7 +122,9 @@ def analyse(config: RunConfig,
     result.indexes = indexes
 
     from hiera_gc.checks import run_checks
+    from hiera_gc.redundancy import run_redundancy
     run_checks(result)
+    run_redundancy(result)
 
     result.stats.update({
         "environments": len(environments),
