@@ -62,6 +62,7 @@ class Inventory:
     scans: Dict[Path, DataDirScan] = field(default_factory=dict)
     keys: List[DataKey] = field(default_factory=list)
     docs: Dict[Path, LoadedDoc] = field(default_factory=dict)
+    file_scan: Dict[Path, DataDirScan] = field(default_factory=dict)
     shared_refs: Dict[Path, List[str]] = field(default_factory=dict)
     env_hiera: Dict[str, HieraConfig] = field(default_factory=dict)
     global_hiera: Optional[HieraConfig] = None
@@ -250,6 +251,7 @@ def _scan_files(inv: Inventory, scan: DataDirScan) -> None:
         rel = path.relative_to(scan.datadir).as_posix()
         scan.files.append(DataFileInfo(file=path, rel=rel,
                                        datadir=scan.datadir))
+        inv.file_scan[path] = scan
         inv.files_scanned += 1
         _load_keys(inv, scan, path, real)
 
