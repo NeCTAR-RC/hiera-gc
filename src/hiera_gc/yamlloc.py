@@ -11,7 +11,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Set, Tuple
 
 import yaml
 
@@ -47,6 +47,12 @@ class LoadedDoc:
     file: Path
     keys: List[TopKey] = field(default_factory=list)
     problems: List[str] = field(default_factory=list)
+    #: Names defined more than once at the top level (loader keeps the
+    #: last occurrence; the fixer must not touch these).
+    duplicates: Set[str] = field(default_factory=set)
+    #: Root mapping uses flow style ({...}, e.g. JSON-as-YAML); line
+    #: spans of individual keys are not removable.
+    flow_root: bool = False
 
 
 def load_data_file(path: Path) -> LoadedDoc:
@@ -81,6 +87,7 @@ def load_data_file(path: Path) -> LoadedDoc:
     if not isinstance(root, yaml.MappingNode):
         doc.problems.append("root is not a mapping (hiera expects a hash)")
         return doc
+    doc.flow_root = bool(root.flow_style)
 
     explicit: List[Tuple[str, yaml.Node, int]] = []
     merge_targets: List[yaml.MappingNode] = []
@@ -100,6 +107,7 @@ def load_data_file(path: Path) -> LoadedDoc:
             doc.problems.append(
                 "duplicate top-level key '%s' (lines %d and %d)"
                 % (name, seen_lines[name], line))
+            doc.duplicates.add(name)
             # YAML loaders keep the last occurrence; mirror that.
             explicit = [e for e in explicit if e[0] != name]
         seen_lines[name] = line

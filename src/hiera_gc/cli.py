@@ -25,6 +25,10 @@ SECTIONS = [
 ]
 FAIL_CHOICES = SECTIONS + ["none"]
 
+FIX_KINDS = ["unused", "stale_params", "redundant", "orphans",
+             "stale_files"]
+DEFAULT_FIX_KINDS = "unused,redundant,orphans,stale_files"
+
 EXIT_CLEAN = 0
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
@@ -107,6 +111,26 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "%s (default: %%(default)s)" % ",".join(FAIL_CHOICES),
     )
     parser.add_argument(
+        "--fix",
+        metavar="ENV",
+        help="Remove fixable findings from this environment's own data "
+        "files. Exactly one environment per run; findings in shared, "
+        "global or module data and in other environments are reported "
+        "as out of scope",
+    )
+    parser.add_argument(
+        "--fix-kinds",
+        default=None,
+        metavar="LIST",
+        help="Comma-separated finding kinds --fix may touch: %s "
+        "(default: %s)" % (",".join(FIX_KINDS), DEFAULT_FIX_KINDS),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --fix: report what would change without writing",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Treat file parse errors as fatal instead of warnings",
@@ -136,6 +160,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parser.error("unknown --fail-on value(s): %s" % ", ".join(bad))
     if "none" in args.fail_on:
         args.fail_on = []
+
+    if args.dry_run and not args.fix:
+        parser.error("--dry-run requires --fix")
+    if args.fix_kinds is not None and not args.fix:
+        parser.error("--fix-kinds requires --fix")
+    if args.fix_kinds is None:
+        args.fix_kinds = DEFAULT_FIX_KINDS
+    args.fix_kinds = [s.strip() for s in args.fix_kinds.split(",")
+                      if s.strip()]
+    bad = [s for s in args.fix_kinds if s not in FIX_KINDS]
+    if bad:
+        parser.error("unknown --fix-kinds value(s): %s" % ", ".join(bad))
     return args
 
 
@@ -163,15 +199,34 @@ def main(argv: Optional[List[str]] = None) -> int:
               % (config.code_dir / "environments"), file=sys.stderr)
         return EXIT_ERROR
 
+    if args.fix and args.fix not in [e.name for e in environments]:
+        print("hiera-gc: --fix environment '%s' is not among the "
+              "analysed environments (%s)"
+              % (args.fix, ", ".join(e.name for e in environments)),
+              file=sys.stderr)
+        return EXIT_ERROR
+
     from hiera_gc.analysis import analyse
     from hiera_gc.report import render_json, render_text
 
     result = analyse(config, environments)
 
+    plan = None
+    if args.fix:
+        if result.parse_errors:
+            print("hiera-gc: refusing to fix: %d parse error(s) leave "
+                  "the analysis blind to some consumers; resolve them "
+                  "first (rerun without --fix to see the warnings)"
+                  % len(result.parse_errors), file=sys.stderr)
+            return EXIT_ERROR
+        from hiera_gc.fix import apply_fixes, plan_fixes
+        plan = plan_fixes(result, args.fix, args.fix_kinds)
+        apply_fixes(plan, dry_run=args.dry_run)
+
     if args.format == "json":
-        text = render_json(result, show=args.show)
+        text = render_json(result, show=args.show, fixes=plan)
     else:
-        text = render_text(result, show=args.show)
+        text = render_text(result, show=args.show, fixes=plan)
 
     if args.output:
         args.output.write_text(text, encoding="utf-8")
@@ -181,6 +236,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.stats:
         print(result.stats_line(), file=sys.stderr)
 
+    if plan is not None and plan.errors:
+        for error in plan.errors:
+            print("hiera-gc: fix failed: %s" % error, file=sys.stderr)
+        return EXIT_ERROR
     if config.strict and result.parse_errors:
         return EXIT_ERROR
     if result.fails(args.fail_on):

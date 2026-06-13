@@ -33,7 +33,8 @@ def _group_by_name(findings) -> Dict[str, list]:
     return grouped
 
 
-def render_text(result: AnalysisResult, show: List[str]) -> str:
+def render_text(result: AnalysisResult, show: List[str],
+                fixes=None) -> str:
     code_dir = getattr(result.config, "code_dir", None)
     out: List[str] = []
     out.append("hiera-gc report  (code: %s, %d environments: %s)" % (
@@ -96,6 +97,9 @@ def render_text(result: AnalysisResult, show: List[str]) -> str:
                 "   (%s)" % location if location else ""))
         out.append("")
 
+    if fixes is not None:
+        _render_fixes(out, fixes, code_dir)
+
     counts = result.counts()
     out.append(
         "Summary: %(keys)d key definitions, %(unused)d unused "
@@ -156,7 +160,44 @@ def _render_possibly(out: List[str], findings, code_dir) -> None:
     out.append("")
 
 
-def render_json(result: AnalysisResult, show: List[str]) -> str:
+def _render_fixes(out: List[str], plan, code_dir) -> None:
+    removed = [a for a in plan.actions if a.action == "remove_key"]
+    deleted = [a for a in plan.actions if a.action == "delete_file"]
+    verb_key = "would remove" if plan.dry_run else "removed"
+    verb_file = "would delete" if plan.dry_run else "deleted"
+    out.append("FIXES  (environment: %s%s)"
+               % (plan.env, ", dry run" if plan.dry_run else ""))
+    if not removed and not deleted:
+        out.append("  nothing fixable in this environment's own data "
+                   "files")
+    for action in removed:
+        span = "%d" % action.start_line
+        if action.end_line > action.start_line:
+            span = "%d-%d" % (action.start_line, action.end_line)
+        out.append("  %s key '%s'   %s:%s   [%s]" % (
+            verb_key, action.key, _rel(action.file, code_dir), span,
+            action.finding))
+    for action in deleted:
+        out.append("  %s file %s   [%s]" % (
+            verb_file, _rel(action.file, code_dir), action.finding))
+    for skip in plan.skipped:
+        out.append("  skipped %s'%s' (%s): %s" % (
+            "" if skip.key is None else "key ",
+            skip.key if skip.key is not None
+            else _rel(skip.file, code_dir),
+            _rel(skip.file, code_dir) if skip.key is not None
+            else skip.finding,
+            skip.reason))
+    if plan.out_of_scope:
+        out.append("  out of scope (shared/global/module data or other "
+                   "environments): %s" % ", ".join(
+                       "%s=%d" % (kind, count) for kind, count
+                       in sorted(plan.out_of_scope.items())))
+    out.append("")
+
+
+def render_json(result: AnalysisResult, show: List[str],
+                fixes=None) -> str:
     code_dir = getattr(result.config, "code_dir", None)
     doc = {
         "schema_version": SCHEMA_VERSION,
@@ -200,6 +241,24 @@ def render_json(result: AnalysisResult, show: List[str]) -> str:
             {"kind": w.kind, "message": w.message, "file": w.file,
              "line": w.line}
             for w in result.warnings]
+    if fixes is not None:
+        doc["fixes"] = {
+            "environment": fixes.env,
+            "dry_run": fixes.dry_run,
+            "kinds": fixes.kinds,
+            "actions": [
+                {"action": a.action, "finding": a.finding,
+                 "file": str(a.file), "key": a.key,
+                 "start_line": a.start_line, "end_line": a.end_line,
+                 "applied": a.applied}
+                for a in fixes.actions],
+            "skipped": [
+                {"finding": s.finding, "file": str(s.file),
+                 "key": s.key, "reason": s.reason}
+                for s in fixes.skipped],
+            "out_of_scope": fixes.out_of_scope,
+            "errors": fixes.errors,
+        }
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
 
