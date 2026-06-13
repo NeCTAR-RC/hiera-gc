@@ -70,6 +70,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Only analyse environments matching this glob",
     )
     parser.add_argument(
+        "--env-dir",
+        action="append",
+        type=Path,
+        default=[],
+        metavar="PATH",
+        help="Additional environments-root directory to search "
+        "(repeatable). Like an extra entry on Puppet's environmentpath: "
+        "each holds environment subdirectories. The default "
+        "<code-dir>/environments is always searched first; on a name "
+        "clash the first root wins",
+    )
+    parser.add_argument(
         "--extra-datadir",
         action="append",
         type=Path,
@@ -182,6 +194,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         global_hiera=args.global_hiera,
         envs=args.env,
         env_glob=args.env_glob,
+        env_dirs=args.env_dir,
         extra_datadirs=args.extra_datadir,
         allowlist=args.allowlist,
         strict=args.strict,
@@ -193,10 +206,12 @@ def main(argv: Optional[List[str]] = None) -> int:
               file=sys.stderr)
         return EXIT_ERROR
 
-    environments = discover_environments(config)
+    env_problems: List[str] = []
+    environments = discover_environments(config, env_problems)
     if not environments:
+        roots = [config.code_dir / "environments"] + config.env_dirs
         print("hiera-gc: no environments found under %s"
-              % (config.code_dir / "environments"), file=sys.stderr)
+              % ", ".join(str(r) for r in roots), file=sys.stderr)
         return EXIT_ERROR
 
     if args.fix and args.fix not in [e.name for e in environments]:
@@ -206,10 +221,12 @@ def main(argv: Optional[List[str]] = None) -> int:
               file=sys.stderr)
         return EXIT_ERROR
 
-    from hiera_gc.analysis import analyse
+    from hiera_gc.analysis import Warn, analyse
     from hiera_gc.report import render_json, render_text
 
     result = analyse(config, environments)
+    for message in env_problems:
+        result.warnings.append(Warn("environment", message))
 
     plan = None
     if args.fix:

@@ -63,6 +63,7 @@ ssh puppet python3 /tmp/hiera-gc.pyz --stats
 hiera-gc [--code-dir /etc/puppetlabs/code] \
          [--global-hiera /etc/puppetlabs/puppet/hiera.yaml] \
          [--env production ...] [--env-glob 'prod*'] \
+         [--env-dir /data/extra-envs ...] \
          [--format text|json] [--output report.txt] \
          [--show unused,possibly_used,redundant,...] \
          [--fail-on unused,redundant] \
@@ -76,6 +77,13 @@ hiera-gc [--code-dir /etc/puppetlabs/code] \
   plus any datadir referenced by hiera.yaml files (absolute datadirs
   such as `/etc/puppetlabs/code/hieradata` are rebased under
   `--code-dir` when analysing a copied tree).
+- `--env-dir PATH` adds another environments-root directory to search,
+  like an extra entry on Puppet's `environmentpath`. Each root holds
+  environment subdirectories; the default `<code-dir>/environments` is
+  searched first, then each `--env-dir` in order. If the same
+  environment name appears under more than one root the first wins (the
+  rest are reported as shadowed), matching Puppet. `--env` and
+  `--env-glob` filter across all roots.
 - `environment.conf` modulepath entries (e.g.
   `site:modules:$basemodulepath`) are honoured.
 - Exit codes: 0 clean, 1 findings matched `--fail-on`, 2 usage or
