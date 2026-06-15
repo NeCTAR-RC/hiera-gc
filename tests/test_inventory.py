@@ -32,14 +32,29 @@ def make_tree(tmp_path, shared_datadir=None):
     for env_name in ("production", "staging"):
         env = code / "environments" / env_name
         (env / "data" / "nodes").mkdir(parents=True)
-        (env / "hiera.yaml").write_text(ENV_HIERA_TEMPLATE.replace(
-            "@SHARED@", shared_datadir or str(shared)))
+        (env / "hiera.yaml").write_text(
+            ENV_HIERA_TEMPLATE.replace(
+                "@SHARED@", shared_datadir or str(shared)
+            )
+        )
         (env / "data" / "base.yaml").write_text(
-            "%s_key: 1\ncommon_to_both: 1\n" % env_name)
-    (code / "environments" / "production" / "data" / "nodes" /
-     "web1.example.yaml").write_text("node_key: ENC[GPG,abc123]\n")
-    (code / "environments" / "production" / "data" /
-     "hiera-eyaml-gpg.recipients").write_text("not yaml at all {{{\n")
+            f"{env_name}_key: 1\ncommon_to_both: 1\n"
+        )
+    (
+        code
+        / "environments"
+        / "production"
+        / "data"
+        / "nodes"
+        / "web1.example.yaml"
+    ).write_text("node_key: ENC[GPG,abc123]\n")
+    (
+        code
+        / "environments"
+        / "production"
+        / "data"
+        / "hiera-eyaml-gpg.recipients"
+    ).write_text("not yaml at all {{{\n")
     return code
 
 
@@ -85,8 +100,9 @@ def test_non_data_files_ignored(tmp_path):
 
 
 def test_absolute_datadir_rebased_under_code_dir(tmp_path):
-    code = make_tree(tmp_path,
-                     shared_datadir="/etc/puppetlabs/code/hieradata/")
+    code = make_tree(
+        tmp_path, shared_datadir="/etc/puppetlabs/code/hieradata/"
+    )
     if Path("/etc/puppetlabs/code/hieradata").is_dir():
         return  # machine has a real puppet tree; rebase will not trigger
     inv = run(code)
@@ -127,7 +143,7 @@ def test_missing_env_hiera_uses_default_hierarchy(tmp_path):
     assert any("no hiera.yaml" in w.message for w in inv.warnings)
 
 
-def test_unparseable_data_file_warns(tmp_path):
+def test_unparsable_data_file_warns(tmp_path):
     code = make_tree(tmp_path)
     bad = code / "environments" / "production" / "data" / "broken.yaml"
     bad.write_text("a: 1\n  b: [unclosed\n")

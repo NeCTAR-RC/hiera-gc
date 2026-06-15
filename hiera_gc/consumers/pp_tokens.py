@@ -6,21 +6,55 @@ class headers and function calls without being desynchronised by
 brackets or keywords hiding inside them. It never raises on malformed
 input; unknown characters become 'other' tokens.
 """
+
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+import re
 
-MULTI_OPS = ("=>", "==", "=~", "!~", "!=", "<=", ">=", "->", "~>",
-             "+=", "<<", ">>")
+MULTI_OPS = (
+    "=>",
+    "==",
+    "=~",
+    "!~",
+    "!=",
+    "<=",
+    ">=",
+    "->",
+    "~>",
+    "+=",
+    "<<",
+    ">>",
+)
 PUNCT = set("()[]{},=:;?|.@+-*<>!")
 
 #: Tokens after which a '/' starts a regex literal rather than division.
-REGEX_AFTER_PUNCT = {"(", "[", "{", ",", "=", "=>", "=~", "!~", "?", ":",
-                     ";", "+", "<<"}
-REGEX_AFTER_IDENT = {"node", "if", "elsif", "unless", "case", "and", "or",
-                     "in", "match"}
+REGEX_AFTER_PUNCT = {
+    "(",
+    "[",
+    "{",
+    ",",
+    "=",
+    "=>",
+    "=~",
+    "!~",
+    "?",
+    ":",
+    ";",
+    "+",
+    "<<",
+}
+REGEX_AFTER_IDENT = {
+    "node",
+    "if",
+    "elsif",
+    "unless",
+    "case",
+    "and",
+    "or",
+    "in",
+    "match",
+}
 
 IDENT_START = re.compile(r"[A-Za-z_]")
 IDENT_CONT = re.compile(r"[A-Za-z0-9_]")
@@ -34,7 +68,7 @@ class Token:
     interpolated: bool = False  # strings/heredocs only
 
 
-def tokenize(text: str) -> List[Token]:
+def tokenize(text: str) -> list[Token]:
     return _Scanner(text).scan()
 
 
@@ -44,12 +78,12 @@ class _Scanner:
         self.i = 0
         self.n = len(text)
         self.line = 1
-        self.tokens: List[Token] = []
+        self.tokens: list[Token] = []
         # Heredoc bodies start on the line after the @(TAG) marker; the
         # placeholder token sits where the marker appeared.
-        self.pending_heredocs: List[Tuple[str, Token]] = []
+        self.pending_heredocs: list[tuple[str, Token]] = []
 
-    def scan(self) -> List[Token]:
+    def scan(self) -> list[Token]:
         while self.i < self.n:
             ch = self.text[self.i]
             if ch == "\n":
@@ -87,10 +121,16 @@ class _Scanner:
         pos = self.i + offset
         return self.text[pos] if pos < self.n else ""
 
-    def _emit(self, kind: str, value: str, line: Optional[int] = None,
-              interpolated: bool = False) -> Token:
-        token = Token(kind, value, line if line is not None else self.line,
-                      interpolated)
+    def _emit(
+        self,
+        kind: str,
+        value: str,
+        line: int | None = None,
+        interpolated: bool = False,
+    ) -> Token:
+        token = Token(
+            kind, value, line if line is not None else self.line, interpolated
+        )
         self.tokens.append(token)
         return token
 
@@ -136,13 +176,13 @@ class _Scanner:
         while self.i < self.n:
             ch = self.text[self.i]
             if ch == "\\":
-                out.append(self.text[self.i:self.i + 2])
+                out.append(self.text[self.i : self.i + 2])
                 self.i += 2
             elif ch == "$":
                 interpolated = True
                 if self._peek(1) == "{":
                     end = self._skip_braced_interpolation(self.i + 1)
-                    out.append(self.text[self.i:end])
+                    out.append(self.text[self.i : end])
                     self.i = end
                 else:
                     out.append(ch)
@@ -155,8 +195,9 @@ class _Scanner:
                     self.line += 1
                 out.append(ch)
                 self.i += 1
-        self._emit("string", "".join(out), start_line,
-                   interpolated=interpolated)
+        self._emit(
+            "string", "".join(out), start_line, interpolated=interpolated
+        )
 
     def _skip_braced_interpolation(self, start: int) -> int:
         """From the '{' of '${', return the index just past the matching
@@ -192,7 +233,8 @@ class _Scanner:
 
     HEREDOC_SPEC = re.compile(
         r"@\(\s*(?P<quote>\")?(?P<tag>[^):/\"]+)(?(quote)\")"
-        r"(?::[^)/]*)?(?:/[^)]*)?\)")
+        r"(?::[^)/]*)?(?:/[^)]*)?\)"
+    )
 
     def _scan_heredoc_marker(self) -> None:
         match = self.HEREDOC_SPEC.match(self.text, self.i)
@@ -209,13 +251,14 @@ class _Scanner:
     def _consume_heredocs(self) -> None:
         for tag, token in self.pending_heredocs:
             end_re = re.compile(
-                r"^[ \t]*(\|[ \t]*)?(-[ \t]*)?%s[ \t]*$" % re.escape(tag))
+                rf"^[ \t]*(\|[ \t]*)?(-[ \t]*)?{re.escape(tag)}[ \t]*$"
+            )
             body_lines = []
             while self.i < self.n:
                 eol = self.text.find("\n", self.i)
                 if eol == -1:
                     eol = self.n
-                line_text = self.text[self.i:eol]
+                line_text = self.text[self.i : eol]
                 self.i = min(eol + 1, self.n)
                 self.line += 1
                 if end_re.match(line_text):
@@ -246,7 +289,7 @@ class _Scanner:
                     j += 2
                     continue
                 if self.text[j] == "/":
-                    self._emit("regex", self.text[self.i + 1:j])
+                    self._emit("regex", self.text[self.i + 1 : j])
                     self.i = j + 1
                     return
                 j += 1
@@ -256,10 +299,13 @@ class _Scanner:
     # -- names and numbers -------------------------------------------------
 
     def _at_absolute_name(self) -> bool:
-        return (self.text[self.i] == ":" and self._peek(1) == ":"
-                and bool(IDENT_START.match(self._peek(2) or " ")))
+        return (
+            self.text[self.i] == ":"
+            and self._peek(1) == ":"
+            and bool(IDENT_START.match(self._peek(2) or " "))
+        )
 
-    def _read_qualified_name(self, start: int) -> Tuple[str, int]:
+    def _read_qualified_name(self, start: int) -> tuple[str, int]:
         i = start
         if self.text.startswith("::", i):
             i += 2
@@ -269,8 +315,11 @@ class _Scanner:
             while j < self.n and IDENT_CONT.match(self.text[j]):
                 j += 1
             parts.append(self.text[i:j])
-            if self.text.startswith("::", j) and j + 2 < self.n \
-                    and IDENT_START.match(self.text[j + 2]):
+            if (
+                self.text.startswith("::", j)
+                and j + 2 < self.n
+                and IDENT_START.match(self.text[j + 2])
+            ):
                 i = j + 2
             else:
                 i = j
@@ -301,10 +350,11 @@ class _Scanner:
 
     def _scan_number(self) -> None:
         j = self.i
-        while j < self.n and (IDENT_CONT.match(self.text[j])
-                              or self.text[j] == "."):
+        while j < self.n and (
+            IDENT_CONT.match(self.text[j]) or self.text[j] == "."
+        ):
             j += 1
-        self._emit("number", self.text[self.i:j])
+        self._emit("number", self.text[self.i : j])
         self.i = j
 
     def _scan_operator(self, ch: str) -> None:

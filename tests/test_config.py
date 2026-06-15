@@ -24,7 +24,8 @@ def test_extra_env_dir_discovered(tmp_path):
 
     problems = []
     envs = discover_environments(
-        RunConfig(code_dir=code, env_dirs=[extra]), problems)
+        RunConfig(code_dir=code, env_dirs=[extra]), problems
+    )
     names = {e.name for e in envs}
     assert names == {"production", "research", "testbed"}
     # Each environment keeps its real path, default root first.
@@ -42,7 +43,8 @@ def test_name_clash_first_root_wins(tmp_path):
 
     problems = []
     envs = discover_environments(
-        RunConfig(code_dir=code, env_dirs=[extra]), problems)
+        RunConfig(code_dir=code, env_dirs=[extra]), problems
+    )
     # Only one 'production', and it is the default-root copy.
     assert [e.name for e in envs] == ["production"]
     assert envs[0].path == code / "environments" / "production"
@@ -54,7 +56,8 @@ def test_missing_extra_root_recorded(tmp_path):
     make_env(code / "environments", "production")
     problems = []
     envs = discover_environments(
-        RunConfig(code_dir=code, env_dirs=[tmp_path / "nowhere"]), problems)
+        RunConfig(code_dir=code, env_dirs=[tmp_path / "nowhere"]), problems
+    )
     assert [e.name for e in envs] == ["production"]
     assert any("does not exist" in p for p in problems)
 
@@ -67,11 +70,13 @@ def test_filters_apply_across_roots(tmp_path):
     make_env(extra, "testbed")
 
     glob_envs = discover_environments(
-        RunConfig(code_dir=code, env_dirs=[extra], env_glob="*b*"))
+        RunConfig(code_dir=code, env_dirs=[extra], env_glob="*b*")
+    )
     assert [e.name for e in glob_envs] == ["testbed"]
 
     named = discover_environments(
-        RunConfig(code_dir=code, env_dirs=[extra], envs=["research"]))
+        RunConfig(code_dir=code, env_dirs=[extra], envs=["research"])
+    )
     assert [e.name for e in named] == ["research"]
 
 
@@ -82,7 +87,8 @@ def test_duplicate_root_not_scanned_twice(tmp_path):
     make_env(extra, "research")
     problems = []
     envs = discover_environments(
-        RunConfig(code_dir=code, env_dirs=[extra, extra]), problems)
+        RunConfig(code_dir=code, env_dirs=[extra, extra]), problems
+    )
     # Repeating the same root must not shadow its own environments.
     assert [e.name for e in envs] == ["production", "research"]
     assert not problems

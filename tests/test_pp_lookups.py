@@ -19,8 +19,13 @@ $d = hiera_hash('hash::key')
 hiera_include('classes')
 """)
     by_key = {c.key: c for c in consumers}
-    assert set(by_key) == {"app::port", "legacy::key", "array::key",
-                           "hash::key", "classes"}
+    assert set(by_key) == {
+        "app::port",
+        "legacy::key",
+        "array::key",
+        "hash::key",
+        "classes",
+    }
     assert not by_key["app::port"].merge
     assert by_key["array::key"].merge
     assert by_key["hash::key"].merge
@@ -35,7 +40,8 @@ def test_lookup_with_array_of_keys():
 
 def test_lookup_hash_form():
     consumers = extract(
-        "$x = lookup({'name' => 'hash::form', 'merge' => 'deep'})")
+        "$x = lookup({'name' => 'hash::form', 'merge' => 'deep'})"
+    )
     (consumer,) = consumers
     assert consumer.key == "hash::form"
     assert consumer.merge
@@ -66,15 +72,13 @@ def test_variable_key_is_opaque_dynamic():
 
 
 def test_deferred_lookup():
-    consumers = extract(
-        "$pw = Deferred('lookup', ['secret::password'])")
+    consumers = extract("$pw = Deferred('lookup', ['secret::password'])")
     (consumer,) = consumers
     assert consumer.key == "secret::password"
 
 
 def test_lookup_in_class_param_default():
-    consumers = extract(
-        "class p (String $x = lookup('p::extra')) {}")
+    consumers = extract("class p (String $x = lookup('p::extra')) {}")
     assert consumers[0].key == "p::extra"
 
 

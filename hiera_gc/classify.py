@@ -1,12 +1,12 @@
 """Classification of every data key definition against the consumer
 indexes of the environments that can see it."""
+
 from __future__ import annotations
 
-import fnmatch
-import re
 from dataclasses import dataclass
+import fnmatch
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+import re
 
 from hiera_gc.consumers.index import ConsumerIndex
 from hiera_gc.consumers.model import STRONG_KINDS
@@ -29,23 +29,23 @@ class Reason:
     detail: str = ""
 
     def location(self) -> str:
-        return "%s:%d" % (self.file, self.line) if self.line \
-            else self.file
+        return f"{self.file}:{self.line}" if self.line else self.file
 
 
 @dataclass
 class KeyFinding:
     key: DataKey
     status: str  # USED | POSSIBLY_USED | UNUSED
-    reason: Optional[Reason]
-    envs: List[str]  # environments the definition was evaluated against
-    stale_param: Optional[str] = None
-    define_shape: Optional[str] = None
+    reason: Reason | None
+    envs: list[str]  # environments the definition was evaluated against
+    stale_param: str | None = None
+    define_shape: str | None = None
     allowlisted: bool = False
 
 
-def visible_envs(key: DataKey, inventory: Inventory,
-                 scopes: Dict[str, EnvScope]) -> List[str]:
+def visible_envs(
+    key: DataKey, inventory: Inventory, scopes: dict[str, EnvScope]
+) -> list[str]:
     all_envs = sorted(scopes)
     if key.layer == "environment":
         return [key.env] if key.env in scopes else []
@@ -60,8 +60,7 @@ def visible_envs(key: DataKey, inventory: Inventory,
         result = []
         for env_name, scope in scopes.items():
             module_dir = scope.modules.get(scan.module)
-            if module_dir is not None and _is_under(scan.datadir,
-                                                    module_dir):
+            if module_dir is not None and _is_under(scan.datadir, module_dir):
                 result.append(env_name)
         return sorted(result)
     return all_envs  # global layer
@@ -75,9 +74,12 @@ def _is_under(path: Path, root: Path) -> bool:
         return False
 
 
-def classify_all(inventory: Inventory, scopes: Dict[str, EnvScope],
-                 indexes: Dict[str, ConsumerIndex],
-                 allowlist) -> List[KeyFinding]:
+def classify_all(
+    inventory: Inventory,
+    scopes: dict[str, EnvScope],
+    indexes: dict[str, ConsumerIndex],
+    allowlist,
+) -> list[KeyFinding]:
     from hiera_gc.allowlist import is_allowlisted
 
     definitions = _definition_locations(inventory)
@@ -90,27 +92,38 @@ def classify_all(inventory: Inventory, scopes: Dict[str, EnvScope],
     return findings
 
 
-def _definition_locations(inventory: Inventory) -> Dict[str,
-                                                        Set[Tuple[str, int]]]:
-    locations: Dict[str, Set[Tuple[str, int]]] = {}
+def _definition_locations(
+    inventory: Inventory,
+) -> dict[str, set[tuple[str, int]]]:
+    locations: dict[str, set[tuple[str, int]]] = {}
     for key in inventory.keys:
-        locations.setdefault(key.name, set()).add(
-            (str(key.file), key.line))
+        locations.setdefault(key.name, set()).add((str(key.file), key.line))
     return locations
 
 
-def _classify_key(key: DataKey, envs: List[str],
-                  indexes: Dict[str, ConsumerIndex],
-                  definitions: Dict[str, Set[Tuple[str, int]]]) -> KeyFinding:
+def _classify_key(
+    key: DataKey,
+    envs: list[str],
+    indexes: dict[str, ConsumerIndex],
+    definitions: dict[str, set[tuple[str, int]]],
+) -> KeyFinding:
     name = key.name
     if name in BUILTIN_KEYS:
-        return KeyFinding(key=key, status=USED, envs=envs, reason=Reason(
-            kind="builtin", file=str(key.file), line=key.line,
-            detail="consumed by hiera itself"))
+        return KeyFinding(
+            key=key,
+            status=USED,
+            envs=envs,
+            reason=Reason(
+                kind="builtin",
+                file=str(key.file),
+                line=key.line,
+                detail="consumed by hiera itself",
+            ),
+        )
 
-    weak_reason: Optional[Reason] = None
-    stale_param: Optional[str] = None
-    define_shape: Optional[str] = None
+    weak_reason: Reason | None = None
+    stale_param: str | None = None
+    define_shape: str | None = None
 
     for env in envs:
         index = indexes.get(env)
@@ -118,8 +131,7 @@ def _classify_key(key: DataKey, envs: List[str],
             continue
         strong = _strong_reason(name, index)
         if strong is not None:
-            return KeyFinding(key=key, status=USED, reason=strong,
-                              envs=envs)
+            return KeyFinding(key=key, status=USED, reason=strong, envs=envs)
         if weak_reason is None:
             weak_reason = _weak_reason(name, index, definitions)
         if stale_param is None:
@@ -128,31 +140,47 @@ def _classify_key(key: DataKey, envs: List[str],
             define_shape = _define_shape(name, index)
 
     if weak_reason is not None:
-        return KeyFinding(key=key, status=POSSIBLY_USED,
-                          reason=weak_reason, envs=envs,
-                          stale_param=stale_param,
-                          define_shape=define_shape)
-    return KeyFinding(key=key, status=UNUSED, reason=None, envs=envs,
-                      stale_param=stale_param, define_shape=define_shape)
+        return KeyFinding(
+            key=key,
+            status=POSSIBLY_USED,
+            reason=weak_reason,
+            envs=envs,
+            stale_param=stale_param,
+            define_shape=define_shape,
+        )
+    return KeyFinding(
+        key=key,
+        status=UNUSED,
+        reason=None,
+        envs=envs,
+        stale_param=stale_param,
+        define_shape=define_shape,
+    )
 
 
-def _strong_reason(name: str, index: ConsumerIndex) -> Optional[Reason]:
+def _strong_reason(name: str, index: ConsumerIndex) -> Reason | None:
     for consumer in index.exact.get(name, ()):
         if consumer.kind in STRONG_KINDS:
-            return Reason(kind=consumer.kind, file=str(consumer.file),
-                          line=consumer.line, detail=consumer.detail)
+            return Reason(
+                kind=consumer.kind,
+                file=str(consumer.file),
+                line=consumer.line,
+                detail=consumer.detail,
+            )
     for consumer in index.dig.get(name, ()):
-        return Reason(kind=consumer.kind, file=str(consumer.file),
-                      line=consumer.line,
-                      detail="%s dotted lookup '%s'"
-                      % (consumer.detail, consumer.key))
+        return Reason(
+            kind=consumer.kind,
+            file=str(consumer.file),
+            line=consumer.line,
+            detail=f"{consumer.detail} dotted lookup '{consumer.key}'",
+        )
     apl = _apl_reason(name, index)
     if apl is not None:
         return apl
     return None
 
 
-def _apl_reason(name: str, index: ConsumerIndex) -> Optional[Reason]:
+def _apl_reason(name: str, index: ConsumerIndex) -> Reason | None:
     if "::" not in name:
         return None
     class_name, _, param = name.rpartition("::")
@@ -164,42 +192,65 @@ def _apl_reason(name: str, index: ConsumerIndex) -> Optional[Reason]:
     class_def, file = entry
     for param_def in class_def.params:
         if param_def.name == param:
-            return Reason(kind="apl", file=str(file), line=param_def.line,
-                          detail="class %s parameter $%s"
-                          % (class_name, param))
+            return Reason(
+                kind="apl",
+                file=str(file),
+                line=param_def.line,
+                detail=f"class {class_name} parameter ${param}",
+            )
     return None
 
 
-def _weak_reason(name: str, index: ConsumerIndex,
-                 definitions: Dict[str, Set[Tuple[str, int]]]
-                 ) -> Optional[Reason]:
+def _weak_reason(
+    name: str,
+    index: ConsumerIndex,
+    definitions: dict[str, set[tuple[str, int]]],
+) -> Reason | None:
     for consumer in index.exact.get(name, ()):
         if consumer.kind not in STRONG_KINDS:
-            return Reason(kind=consumer.kind, file=str(consumer.file),
-                          line=consumer.line, detail=consumer.detail)
+            return Reason(
+                kind=consumer.kind,
+                file=str(consumer.file),
+                line=consumer.line,
+                detail=consumer.detail,
+            )
     for consumer in index.dotted_full.get(name, ()):
-        return Reason(kind="dotted_ambiguity", file=str(consumer.file),
-                      line=consumer.line,
-                      detail="lookup('%s') digs into a top-level key "
-                      "'%s' but may target this literal key"
-                      % (consumer.key, name.split(".", 1)[0]))
+        return Reason(
+            kind="dotted_ambiguity",
+            file=str(consumer.file),
+            line=consumer.line,
+            detail="lookup('{}') digs into a top-level key "
+            "'{}' but may target this literal key".format(
+                consumer.key, name.split(".", 1)[0]
+            ),
+        )
     for consumer in index.patterns:
         if fnmatch.fnmatchcase(name, consumer.pattern or ""):
-            return Reason(kind="dynamic_pattern", file=str(consumer.file),
-                          line=consumer.line,
-                          detail="matches %s key pattern %r"
-                          % (consumer.detail, consumer.pattern))
+            return Reason(
+                kind="dynamic_pattern",
+                file=str(consumer.file),
+                line=consumer.line,
+                detail=f"matches {consumer.detail} key pattern {consumer.pattern!r}",
+            )
     for entry in index.lookup_options:
-        if (entry.regex and _regex_match(entry.name, name)) or \
-                (not entry.regex and entry.name == name):
-            return Reason(kind="lookup_options_ref", file=str(entry.file),
-                          line=entry.line,
-                          detail="referenced by lookup_options")
+        if (entry.regex and _regex_match(entry.name, name)) or (
+            not entry.regex and entry.name == name
+        ):
+            return Reason(
+                kind="lookup_options_ref",
+                file=str(entry.file),
+                line=entry.line,
+                detail="referenced by lookup_options",
+            )
     own = definitions.get(name, set())
     for file, line in index.mentions.get(name, ()):
         if (str(file), line) not in own:
-            return Reason(kind="mention", file=str(file), line=line,
-                          detail="key name appears verbatim")
+            return Reason(
+                kind="mention",
+                file=str(file),
+                line=line,
+                detail="key name appears verbatim",
+            )
     return None
 
 
@@ -210,7 +261,7 @@ def _regex_match(pattern: str, name: str) -> bool:
         return False
 
 
-def _stale_param(name: str, index: ConsumerIndex) -> Optional[str]:
+def _stale_param(name: str, index: ConsumerIndex) -> str | None:
     if "::" not in name:
         return None
     class_name, _, param = name.rpartition("::")
@@ -220,11 +271,13 @@ def _stale_param(name: str, index: ConsumerIndex) -> Optional[str]:
     class_def, file = entry
     if any(p.name == param for p in class_def.params):
         return None
-    return ("class %s exists (%s:%d) but has no parameter $%s"
-            % (class_name, file, class_def.line, param))
+    return (
+        f"class {class_name} exists ({file}:{class_def.line}) "
+        f"but has no parameter ${param}"
+    )
 
 
-def _define_shape(name: str, index: ConsumerIndex) -> Optional[str]:
+def _define_shape(name: str, index: ConsumerIndex) -> str | None:
     if "::" not in name:
         return None
     define_name, _, param = name.rpartition("::")
@@ -233,7 +286,9 @@ def _define_shape(name: str, index: ConsumerIndex) -> Optional[str]:
         return None
     define_def, file = entry
     if any(p.name == param for p in define_def.params):
-        return ("matches defined type %s (%s:%d), which does not use "
-                "automatic parameter lookup" % (define_name, file,
-                                                define_def.line))
+        return (
+            f"matches defined type {define_name} "
+            f"({file}:{define_def.line}), which does not use "
+            "automatic parameter lookup"
+        )
     return None

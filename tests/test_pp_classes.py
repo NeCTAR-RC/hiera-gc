@@ -10,9 +10,12 @@ def extract(text):
 
 def class_params(text, name=None):
     defs = extract(text)
-    assert defs.classes, "no class found in: %s" % text
-    found = defs.classes[0] if name is None else \
-        [c for c in defs.classes if c.name == name][0]
+    assert defs.classes, f"no class found in: {text}"
+    found = (
+        defs.classes[0]
+        if name is None
+        else [c for c in defs.classes if c.name == name][0]
+    )
     return [p.name for p in found.params]
 
 
@@ -38,17 +41,28 @@ def test_nasty_header():
     defs = extract(NASTY_HEADER)
     assert [c.name for c in defs.classes] == ["sshd"]
     assert class_params(NASTY_HEADER) == [
-        "banner", "config", "protocol", "weird", "untyped", "port"]
+        "banner",
+        "config",
+        "protocol",
+        "weird",
+        "untyped",
+        "port",
+    ]
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("class empty {}", []),
-    ("class one::two::three ($a, $b) {}", ["a", "b"]),
-    ("class t (String $x = 'a,b', Array $y = [1, [2, (3)]]) {}",
-     ["x", "y"]),
-    ("class multi (\n  $a,\n  $b\n) {}", ["a", "b"]),
-    ("class trail ($a,) {}", ["a"]),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("class empty {}", []),
+        ("class one::two::three ($a, $b) {}", ["a", "b"]),
+        (
+            "class t (String $x = 'a,b', Array $y = [1, [2, (3)]]) {}",
+            ["x", "y"],
+        ),
+        ("class multi (\n  $a,\n  $b\n) {}", ["a", "b"]),
+        ("class trail ($a,) {}", ["a"]),
+    ],
+)
 def test_param_extraction(text, expected):
     assert class_params(text) == expected
 
@@ -72,7 +86,8 @@ def test_define_recorded_separately():
 
 def test_inherits_without_params():
     defs = extract(
-        "class a::role::x inherits a::role::base {\n  include p::q\n}")
+        "class a::role::x inherits a::role::base {\n  include p::q\n}"
+    )
     assert [c.name for c in defs.classes] == ["a::role::x"]
     assert defs.classes[0].params == []
 
@@ -91,7 +106,8 @@ node default {}
     assert defs.nodes[0].patterns == [("literal", "cc5.example.com")]
     assert defs.nodes[1].patterns == [
         ("regex", "^oc[1-2]\\.example\\.com$"),
-        ("literal", "extra.example.com")]
+        ("literal", "extra.example.com"),
+    ]
     assert defs.nodes[2].patterns == [("default", "default")]
 
 
@@ -120,7 +136,8 @@ def test_selector_assignment_values_collected():
 
 def test_selector_with_expression_value_incomplete():
     defs = extract(
-        "$hw = $facts['x'] ? { /a/ => 'one', default => $facts['y'] }")
+        "$hw = $facts['x'] ? { /a/ => 'one', default => $facts['y'] }"
+    )
     (assign,) = defs.assignments
     assert not assign.literal
 

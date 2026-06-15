@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
-from typing import List, Optional
+import sys
 
 from hiera_gc import __version__
 from hiera_gc.config import (
@@ -25,8 +24,7 @@ SECTIONS = [
 ]
 FAIL_CHOICES = SECTIONS + ["none"]
 
-FIX_KINDS = ["unused", "stale_params", "redundant", "orphans",
-             "stale_files"]
+FIX_KINDS = ["unused", "stale_params", "redundant", "orphans", "stale_files"]
 DEFAULT_FIX_KINDS = "unused,redundant,orphans,stale_files"
 
 EXIT_CLEAN = 0
@@ -34,7 +32,7 @@ EXIT_FINDINGS = 1
 EXIT_ERROR = 2
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hiera-gc",
         description=(
@@ -112,15 +110,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--show",
         default=",".join(SECTIONS),
         metavar="LIST",
-        help="Comma-separated report sections: %s (default: all)"
-        % ",".join(SECTIONS),
+        help="Comma-separated report sections: {} (default: all)".format(
+            ",".join(SECTIONS)
+        ),
     )
     parser.add_argument(
         "--fail-on",
         default="unused",
         metavar="LIST",
         help="Comma-separated finding kinds that give exit code 1: "
-        "%s (default: %%(default)s)" % ",".join(FAIL_CHOICES),
+        "{} (default: %(default)s)".format(",".join(FAIL_CHOICES)),
     )
     parser.add_argument(
         "--fix",
@@ -134,8 +133,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--fix-kinds",
         default=None,
         metavar="LIST",
-        help="Comma-separated finding kinds --fix may touch: %s "
-        "(default: %s)" % (",".join(FIX_KINDS), DEFAULT_FIX_KINDS),
+        help="Comma-separated finding kinds --fix may touch: {} "
+        "(default: {})".format(",".join(FIX_KINDS), DEFAULT_FIX_KINDS),
     )
     parser.add_argument(
         "--dry-run",
@@ -164,41 +163,48 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     args.show = [s.strip() for s in args.show.split(",") if s.strip()]
     bad = [s for s in args.show if s not in SECTIONS]
     if bad:
-        parser.error("unknown --show section(s): %s" % ", ".join(bad))
+        parser.error("unknown --show section(s): {}".format(", ".join(bad)))
 
     args.fail_on = [s.strip() for s in args.fail_on.split(",") if s.strip()]
     bad = [s for s in args.fail_on if s not in FAIL_CHOICES]
     if bad:
-        parser.error("unknown --fail-on value(s): %s" % ", ".join(bad))
+        parser.error("unknown --fail-on value(s): {}".format(", ".join(bad)))
     if "none" in args.fail_on:
         args.fail_on = []
 
     if args.fix:
         if not args.env:
-            parser.error("--fix requires --env NAME: it removes a single "
-                         "environment's own findings and will not fix "
-                         "every environment at once")
+            parser.error(
+                "--fix requires --env NAME: it removes a single "
+                "environment's own findings and will not fix "
+                "every environment at once"
+            )
         if len(args.env) > 1:
-            parser.error("--fix acts on exactly one environment per run; "
-                         "give a single --env NAME")
+            parser.error(
+                "--fix acts on exactly one environment per run; "
+                "give a single --env NAME"
+            )
         if args.env_glob:
-            parser.error("--fix cannot be combined with --env-glob; name "
-                         "the one environment with --env")
+            parser.error(
+                "--fix cannot be combined with --env-glob; name "
+                "the one environment with --env"
+            )
     if args.dry_run and not args.fix:
         parser.error("--dry-run requires --fix")
     if args.fix_kinds is not None and not args.fix:
         parser.error("--fix-kinds requires --fix")
     if args.fix_kinds is None:
         args.fix_kinds = DEFAULT_FIX_KINDS
-    args.fix_kinds = [s.strip() for s in args.fix_kinds.split(",")
-                      if s.strip()]
+    args.fix_kinds = [
+        s.strip() for s in args.fix_kinds.split(",") if s.strip()
+    ]
     bad = [s for s in args.fix_kinds if s not in FIX_KINDS]
     if bad:
-        parser.error("unknown --fix-kinds value(s): %s" % ", ".join(bad))
+        parser.error("unknown --fix-kinds value(s): {}".format(", ".join(bad)))
     return args
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     config = RunConfig(
         code_dir=args.code_dir,
@@ -213,16 +219,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     if not config.code_dir.is_dir():
-        print("hiera-gc: code dir not found: %s" % config.code_dir,
-              file=sys.stderr)
+        print(
+            f"hiera-gc: code dir not found: {config.code_dir}", file=sys.stderr
+        )
         return EXIT_ERROR
 
-    env_problems: List[str] = []
+    env_problems: list[str] = []
     environments = discover_environments(config, env_problems)
     if not environments:
         roots = [config.code_dir / "environments"] + config.env_dirs
-        print("hiera-gc: no environments found under %s"
-              % ", ".join(str(r) for r in roots), file=sys.stderr)
+        print(
+            "hiera-gc: no environments found under {}".format(
+                ", ".join(str(r) for r in roots)
+            ),
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
     from hiera_gc.analysis import Warn, analyse
@@ -235,12 +246,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     plan = None
     if args.fix:
         if result.parse_errors:
-            print("hiera-gc: refusing to fix: %d parse error(s) leave "
-                  "the analysis blind to some consumers; resolve them "
-                  "first (rerun without --fix to see the warnings)"
-                  % len(result.parse_errors), file=sys.stderr)
+            print(
+                f"hiera-gc: refusing to fix: "
+                f"{len(result.parse_errors)} parse error(s) leave "
+                "the analysis blind to some consumers; resolve them "
+                "first (rerun without --fix to see the warnings)",
+                file=sys.stderr,
+            )
             return EXIT_ERROR
         from hiera_gc.fix import apply_fixes, plan_fixes
+
         plan = plan_fixes(result, args.env[0], args.fix_kinds)
         apply_fixes(plan, dry_run=args.dry_run)
 
@@ -259,7 +274,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if plan is not None and plan.errors:
         for error in plan.errors:
-            print("hiera-gc: fix failed: %s" % error, file=sys.stderr)
+            print(f"hiera-gc: fix failed: {error}", file=sys.stderr)
         return EXIT_ERROR
     if config.strict and result.parse_errors:
         return EXIT_ERROR

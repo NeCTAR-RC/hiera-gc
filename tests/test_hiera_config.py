@@ -49,14 +49,19 @@ def test_parses_ardc_style_config(tmp_path):
 
 
 def test_glob_globs_and_mapped_paths(tmp_path):
-    config = parse_hiera_config(write(tmp_path, """\
+    config = parse_hiera_config(
+        write(
+            tmp_path,
+            """\
 version: 5
 hierarchy:
   - name: globby
     glob: "globs/*.yaml"
   - name: mapped
     mapped_paths: [service_names, name, "services/%{name}.yaml"]
-"""))
+""",
+        )
+    )
     globby, mapped = config.entries
     assert globby.patterns == ["globs/*.yaml"]
     assert globby.glob_flags == [True]
@@ -66,7 +71,10 @@ hierarchy:
 
 
 def test_unknown_and_hocon_backends_warn(tmp_path):
-    config = parse_hiera_config(write(tmp_path, """\
+    config = parse_hiera_config(
+        write(
+            tmp_path,
+            """\
 version: 5
 hierarchy:
   - name: vault
@@ -74,7 +82,9 @@ hierarchy:
   - name: hocon
     data_hash: hocon_data
     path: stuff.conf
-"""))
+""",
+        )
+    )
     assert config.usable
     assert not config.entries[0].scannable
     assert not config.entries[1].scannable
@@ -92,10 +102,15 @@ def test_hiera3_and_wrong_version_rejected(tmp_path):
 
 
 def test_entry_without_paths_warns(tmp_path):
-    config = parse_hiera_config(write(tmp_path, """\
+    config = parse_hiera_config(
+        write(
+            tmp_path,
+            """\
 version: 5
 hierarchy:
   - name: pathless
     data_hash: yaml_data
-"""))
+""",
+        )
+    )
     assert any("no path" in w.message for w in config.warnings)

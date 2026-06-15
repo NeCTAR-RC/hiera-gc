@@ -46,8 +46,13 @@ Old <%= scope.lookupvar('sshd::old') %>
 def test_erb_extraction():
     consumers = extract_erb(ERB.replace("%1>", "%>"), FILE)
     by_key = {c.key: c for c in consumers}
-    assert set(by_key) == {"sshd::port", "sshd::banner", "sshd::legacy",
-                           "sshd::merged", "sshd::old"}
+    assert set(by_key) == {
+        "sshd::port",
+        "sshd::banner",
+        "sshd::legacy",
+        "sshd::merged",
+        "sshd::old",
+    }
     assert by_key["sshd::port"].kind == "erb_var"
     assert by_key["sshd::banner"].kind == "erb_lookup"
     assert by_key["sshd::banner"].line == 3
@@ -69,8 +74,11 @@ end
 def test_ruby_extraction():
     consumers = extract_ruby(RUBY, FILE)
     by_key = {c.key: c for c in consumers}
-    assert set(by_key) == {"sshd::ruby_key", "sshd::plain_key",
-                           "sshd::ruby_var"}
+    assert set(by_key) == {
+        "sshd::ruby_key",
+        "sshd::plain_key",
+        "sshd::ruby_var",
+    }
     assert by_key["sshd::ruby_key"].kind == "ruby_lookup"
     assert by_key["sshd::ruby_key"].line == 3
     assert by_key["sshd::ruby_var"].kind == "ruby_var"

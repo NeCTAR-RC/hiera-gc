@@ -1,10 +1,10 @@
 """Builds the per-environment consumer index by driving every extractor
 over the environment's visible files."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 from hiera_gc.consumers.data_interp import LookupOptionsEntry
 from hiera_gc.consumers.model import Consumer
@@ -17,26 +17,28 @@ from hiera_gc.yamlloc import LoadedDoc
 @dataclass
 class ConsumerIndex:
     env: str
-    exact: Dict[str, List[Consumer]] = field(default_factory=dict)
+    exact: dict[str, list[Consumer]] = field(default_factory=dict)
     #: lookup('a.b.c') digs under top-level key 'a'.
-    dig: Dict[str, List[Consumer]] = field(default_factory=dict)
+    dig: dict[str, list[Consumer]] = field(default_factory=dict)
     #: ...but might also target a literal key named 'a.b.c'.
-    dotted_full: Dict[str, List[Consumer]] = field(default_factory=dict)
-    patterns: List[Consumer] = field(default_factory=list)
-    dynamics: List[Consumer] = field(default_factory=list)
-    lookup_options: List[LookupOptionsEntry] = field(default_factory=list)
-    classes: Dict[str, Tuple[ClassDef, Path]] = field(default_factory=dict)
-    defines: Dict[str, Tuple[ClassDef, Path]] = field(default_factory=dict)
-    nodes: List[NodeDef] = field(default_factory=list)
+    dotted_full: dict[str, list[Consumer]] = field(default_factory=dict)
+    patterns: list[Consumer] = field(default_factory=list)
+    dynamics: list[Consumer] = field(default_factory=list)
+    lookup_options: list[LookupOptionsEntry] = field(default_factory=list)
+    classes: dict[str, tuple[ClassDef, Path]] = field(default_factory=dict)
+    defines: dict[str, tuple[ClassDef, Path]] = field(default_factory=dict)
+    nodes: list[NodeDef] = field(default_factory=list)
     node_default: bool = False
-    assignments: Dict[str, List[VarAssign]] = field(default_factory=dict)
+    assignments: dict[str, list[VarAssign]] = field(default_factory=dict)
     mentions: MentionMap = field(default_factory=dict)
-    hiera_includes: List[Consumer] = field(default_factory=list)
+    hiera_includes: list[Consumer] = field(default_factory=list)
 
 
 def build_consumer_index(
-        scope: EnvScope, cache: ExtractorCache,
-        data_docs: List[Tuple[Path, LoadedDoc]]) -> ConsumerIndex:
+    scope: EnvScope,
+    cache: ExtractorCache,
+    data_docs: list[tuple[Path, LoadedDoc]],
+) -> ConsumerIndex:
     index = ConsumerIndex(env=scope.env.name)
 
     for path in scope.pp_files:
@@ -72,8 +74,7 @@ def build_consumer_index(
     return index
 
 
-def _add_consumers(index: ConsumerIndex,
-                   consumers: List[Consumer]) -> None:
+def _add_consumers(index: ConsumerIndex, consumers: list[Consumer]) -> None:
     for consumer in consumers:
         if consumer.kind == "dynamic":
             index.dynamics.append(consumer)

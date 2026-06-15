@@ -62,12 +62,7 @@ def test_heredoc_literal_body_is_opaque():
 
 
 def test_heredoc_interpolated_and_margin_markers():
-    text = (
-        '$motd = @("EOT"/n)\n'
-        "  Welcome ${fqdn}\n"
-        "  | EOT\n"
-        "$x = 1\n"
-    )
+    text = '$motd = @("EOT"/n)\n  Welcome ${fqdn}\n  | EOT\n$x = 1\n'
     heredoc = [t for t in tokenize(text) if t.kind == "string"][0]
     assert heredoc.interpolated
     assert "Welcome" in heredoc.value
@@ -81,8 +76,11 @@ def test_two_heredocs_on_one_line():
         "second body\n"
         "TWO\n"
     )
-    bodies = [t.value for t in tokenize(text) if t.kind == "string"
-              and t.value not in ("x",)]
+    bodies = [
+        t.value
+        for t in tokenize(text)
+        if t.kind == "string" and t.value not in ("x",)
+    ]
     assert bodies == ["first body", "second body"]
 
 
@@ -126,10 +124,13 @@ def test_operators():
 def test_line_numbers():
     tokens = tokenize("a\nb\n  c\n")
     assert [(t.value, t.line) for t in tokens] == [
-        ("a", 1), ("b", 2), ("c", 3)]
+        ("a", 1),
+        ("b", 2),
+        ("c", 3),
+    ]
 
 
 def test_never_raises_on_garbage():
-    tokenize("\x00 ~~~ `weird` \\ %% '" )
+    tokenize("\x00 ~~~ `weird` \\ %% '")
     tokenize('"unterminated ${ also unterminated')
     tokenize("@(NEVERENDS)\nbody without end tag")

@@ -5,22 +5,40 @@ from hiera_gc.checks import hiera_pattern_to_regex
 from hiera_gc.config import Environment, RunConfig
 
 
-@pytest.mark.parametrize("pattern,is_glob,path,matches", [
-    ("nodes/%{trusted.certname}.yaml", False, "nodes/a.example.yaml", True),
-    ("nodes/%{trusted.certname}.yaml", False, "nodes/a.example.yml", False),
-    ("base.yaml", False, "base.yaml", True),
-    ("base.yaml", False, "subdir/base.yaml", False),
-    ("os/%{facts.os.name}/%{facts.os.release.major}.yaml", False,
-     "os/Ubuntu/22.04.yaml", True),
-    ("globs/*.yaml", True, "globs/a.yaml", True),
-    ("globs/*.yaml", True, "globs/sub/a.yaml", False),
-    ("deep/**.yaml", True, "deep/sub/dir/a.yaml", True),
-    ("svc/{web,db}.yaml", True, "svc/web.yaml", True),
-    ("svc/{web,db}.yaml", True, "svc/mq.yaml", False),
-    ("file[0-9].yaml", True, "file7.yaml", True),
-])
+@pytest.mark.parametrize(
+    "pattern,is_glob,path,matches",
+    [
+        (
+            "nodes/%{trusted.certname}.yaml",
+            False,
+            "nodes/a.example.yaml",
+            True,
+        ),
+        (
+            "nodes/%{trusted.certname}.yaml",
+            False,
+            "nodes/a.example.yml",
+            False,
+        ),
+        ("base.yaml", False, "base.yaml", True),
+        ("base.yaml", False, "subdir/base.yaml", False),
+        (
+            "os/%{facts.os.name}/%{facts.os.release.major}.yaml",
+            False,
+            "os/Ubuntu/22.04.yaml",
+            True,
+        ),
+        ("globs/*.yaml", True, "globs/a.yaml", True),
+        ("globs/*.yaml", True, "globs/sub/a.yaml", False),
+        ("deep/**.yaml", True, "deep/sub/dir/a.yaml", True),
+        ("svc/{web,db}.yaml", True, "svc/web.yaml", True),
+        ("svc/{web,db}.yaml", True, "svc/mq.yaml", False),
+        ("file[0-9].yaml", True, "file7.yaml", True),
+    ],
+)
 def test_hiera_pattern_to_regex(pattern, is_glob, path, matches):
     import re
+
     regex = re.compile(hiera_pattern_to_regex(pattern, is_glob))
     assert bool(regex.fullmatch(path)) == matches
 
@@ -43,15 +61,15 @@ hierarchy:
       - base.yaml
 """)
     node_block = "node default {}\n" if with_default_node else ""
-    (env / "manifests" / "site.pp").write_text("""\
-$nodegroup = $facts['clientcert'] ? {
+    (env / "manifests" / "site.pp").write_text(f"""\
+$nodegroup = $facts['clientcert'] ? {{
   /^web/  => 'group-web',
   default => 0,
-}
+}}
 $hardwaregroup = $facts['model']
-node 'web1.example' { }
-node /^db[1-3]\\.example$/ { }
-%s""" % node_block)
+node 'web1.example' {{ }}
+node /^db[1-3]\\.example$/ {{ }}
+{node_block}""")
 
     data = env / "data"
     (data / "base.yaml").write_text("k: 1\n")
@@ -102,8 +120,10 @@ def test_uncollectible_var_noted(tmp_path):
     result = analyse(config, [Environment("production", env)])
     # $hardwaregroup is fact-derived; its files must not be flagged.
     assert "metal.yaml" not in {s.file.name for s in result.stale_files}
-    assert any(w.kind == "stale_check_skipped" and "hardwaregroup"
-               in w.message for w in result.warnings)
+    assert any(
+        w.kind == "stale_check_skipped" and "hardwaregroup" in w.message
+        for w in result.warnings
+    )
 
 
 def test_stale_lookup_options_entry(tmp_path):
@@ -119,7 +139,6 @@ lookup_options:
 """)
     config = RunConfig(code_dir=code, global_hiera=None)
     result = analyse(config, [Environment("production", env)])
-    stale = [w for w in result.warnings
-             if w.kind == "stale_lookup_options"]
+    stale = [w for w in result.warnings if w.kind == "stale_lookup_options"]
     assert len(stale) == 1
     assert "vanished::key" in stale[0].message

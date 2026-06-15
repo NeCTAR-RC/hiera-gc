@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
 
 from hiera_gc.config import Environment, RunConfig
 
@@ -16,41 +15,45 @@ class Warn:
     def location(self) -> str:
         if not self.file:
             return ""
-        return "%s:%d" % (self.file, self.line) if self.line else self.file
+        return f"{self.file}:{self.line}" if self.line else self.file
 
 
 @dataclass
 class AnalysisResult:
-    environments: List[str] = field(default_factory=list)
-    keys: List["object"] = field(default_factory=list)
-    orphans: List["object"] = field(default_factory=list)
-    stale_files: List["object"] = field(default_factory=list)
-    redundant: List["object"] = field(default_factory=list)
-    shadowed: List["object"] = field(default_factory=list)
-    warnings: List[Warn] = field(default_factory=list)
-    stats: Dict[str, int] = field(default_factory=dict)
+    environments: list[str] = field(default_factory=list)
+    keys: list[object] = field(default_factory=list)
+    orphans: list[object] = field(default_factory=list)
+    stale_files: list[object] = field(default_factory=list)
+    redundant: list[object] = field(default_factory=list)
+    shadowed: list[object] = field(default_factory=list)
+    warnings: list[Warn] = field(default_factory=list)
+    stats: dict[str, int] = field(default_factory=dict)
     # Populated by analyse() for the later analysis passes.
     config: object = None
     inventory: object = None
-    scopes: Dict[str, "object"] = field(default_factory=dict)
-    indexes: Dict[str, "object"] = field(default_factory=dict)
+    scopes: dict[str, object] = field(default_factory=dict)
+    indexes: dict[str, object] = field(default_factory=dict)
 
     @property
-    def parse_errors(self) -> List[Warn]:
+    def parse_errors(self) -> list[Warn]:
         return [w for w in self.warnings if w.kind == "parse_error"]
 
-    def counts(self) -> Dict[str, int]:
-        active = [k for k in self.keys
-                  if not getattr(k, "allowlisted", False)]
+    def counts(self) -> dict[str, int]:
+        active = [k for k in self.keys if not getattr(k, "allowlisted", False)]
         unused = [k for k in active if getattr(k, "status", "") == "UNUSED"]
         return {
             "keys": len(self.keys),
             "unused": len(unused),
             "possibly_used": len(
-                [k for k in active
-                 if getattr(k, "status", "") == "POSSIBLY_USED"]),
+                [
+                    k
+                    for k in active
+                    if getattr(k, "status", "") == "POSSIBLY_USED"
+                ]
+            ),
             "stale_params": len(
-                [k for k in unused if getattr(k, "stale_param", None)]),
+                [k for k in unused if getattr(k, "stale_param", None)]
+            ),
             "allowlisted": len(self.keys) - len(active),
             "orphans": len(self.orphans),
             "stale_files": len(self.stale_files),
@@ -59,7 +62,7 @@ class AnalysisResult:
             "warnings": len(self.warnings),
         }
 
-    def fails(self, fail_on: List[str]) -> bool:
+    def fails(self, fail_on: list[str]) -> bool:
         counts = self.counts()
         triggers = {
             "unused": counts["unused"],
@@ -73,12 +76,13 @@ class AnalysisResult:
         return any(triggers.get(section, 0) for section in fail_on)
 
     def stats_line(self) -> str:
-        parts = ["%s=%d" % (k, v) for k, v in sorted(self.stats.items())]
+        parts = [f"{k}={v}" for k, v in sorted(self.stats.items())]
         return "hiera-gc stats: " + " ".join(parts)
 
 
-def analyse(config: RunConfig,
-            environments: List[Environment]) -> AnalysisResult:
+def analyse(
+    config: RunConfig, environments: list[Environment]
+) -> AnalysisResult:
     from hiera_gc.allowlist import load_allowlist
     from hiera_gc.classify import classify_all
     from hiera_gc.consumers.index import build_consumer_index
@@ -109,8 +113,7 @@ def analyse(config: RunConfig,
     indexes = {}
     for env in environments:
         docs = _visible_docs(env.name, inventory, scopes)
-        indexes[env.name] = build_consumer_index(
-            scopes[env.name], cache, docs)
+        indexes[env.name] = build_consumer_index(scopes[env.name], cache, docs)
     result.warnings.extend(cache.warnings)
     _consumer_warnings(indexes, result)
 
@@ -125,16 +128,19 @@ def analyse(config: RunConfig,
 
     from hiera_gc.checks import run_checks
     from hiera_gc.redundancy import run_redundancy
+
     run_checks(result)
     run_redundancy(result)
 
-    result.stats.update({
-        "environments": len(environments),
-        "data_files": inventory.files_scanned,
-        "data_keys": len(inventory.keys),
-        "pp_files": sum(len(s.pp_files) for s in scopes.values()),
-        "modules": len(scanned_modules),
-    })
+    result.stats.update(
+        {
+            "environments": len(environments),
+            "data_files": inventory.files_scanned,
+            "data_keys": len(inventory.keys),
+            "pp_files": sum(len(s.pp_files) for s in scopes.values()),
+            "modules": len(scanned_modules),
+        }
+    )
     return result
 
 
@@ -159,8 +165,7 @@ def _visible_docs(env_name: str, inventory, scopes) -> list:
                 continue
         elif scan.layer == "module":
             module_dir = scope.modules.get(scan.module or "")
-            if module_dir is None or not _is_under(scan.datadir,
-                                                   module_dir):
+            if module_dir is None or not _is_under(scan.datadir, module_dir):
                 continue
         for info in scan.files:
             doc = inventory.docs.get(info.file.resolve())
@@ -169,26 +174,35 @@ def _visible_docs(env_name: str, inventory, scopes) -> list:
     return docs
 
 
-def _consumer_warnings(indexes: Dict[str, "object"],
-                       result: AnalysisResult) -> None:
+def _consumer_warnings(
+    indexes: dict[str, object], result: AnalysisResult
+) -> None:
     seen = set()
     for index in indexes.values():
         for consumer in index.dynamics:
             spot = (str(consumer.file), consumer.line)
             if spot not in seen:
                 seen.add(spot)
-                result.warnings.append(Warn(
-                    "dynamic_lookup",
-                    "%s with a runtime-built key; its consumption is "
-                    "invisible to this analysis" % consumer.detail,
-                    file=str(consumer.file), line=consumer.line))
+                result.warnings.append(
+                    Warn(
+                        "dynamic_lookup",
+                        f"{consumer.detail} with a runtime-built key; its consumption is "
+                        "invisible to this analysis",
+                        file=str(consumer.file),
+                        line=consumer.line,
+                    )
+                )
         for consumer in index.hiera_includes:
             spot = ("hiera_include", str(consumer.file), consumer.line)
             if spot not in seen:
                 seen.add(spot)
-                result.warnings.append(Warn(
-                    "hiera_include",
-                    "hiera_include('%s') assigns classes from data; "
-                    "class names listed under that key are consumers "
-                    "this analysis does not follow" % consumer.key,
-                    file=str(consumer.file), line=consumer.line))
+                result.warnings.append(
+                    Warn(
+                        "hiera_include",
+                        f"hiera_include('{consumer.key}') assigns classes from data; "
+                        "class names listed under that key are consumers "
+                        "this analysis does not follow",
+                        file=str(consumer.file),
+                        line=consumer.line,
+                    )
+                )

@@ -28,17 +28,21 @@ enc_copy: ENC[GPG,identicalblob==]
         "  $v = lookup('shadowed_in_env')\n"
         "  $n = lookup('node_same')\n"
         "  $i = lookup('intermediate_differs')\n"
-        "}\n")
+        "}\n"
+    )
     (sshd / "hiera.yaml").write_text(
-        "version: 5\nhierarchy:\n  - name: defaults\n    path: common.yaml\n")
+        "version: 5\nhierarchy:\n  - name: defaults\n    path: common.yaml\n"
+    )
     (sshd / "data").mkdir()
     (sshd / "data" / "common.yaml").write_text("sshd::port: 22\n")
 
     env = code / "environments" / "production"
     (env / "manifests").mkdir(parents=True)
     (env / "manifests" / "site.pp").write_text(
-        "node /^web/ { include sshd }\n")
-    (env / "hiera.yaml").write_text("""\
+        "node /^web/ { include sshd }\n"
+    )
+    (env / "hiera.yaml").write_text(
+        """\
 version: 5
 hierarchy:
   - name: env
@@ -50,7 +54,8 @@ hierarchy:
     datadir: '@SHARED@'
     paths:
       - common.yaml
-""".replace("@SHARED@", str(shared)))
+""".replace("@SHARED@", str(shared))
+    )
     (env / "data" / "nodes").mkdir(parents=True)
     (env / "data" / "groups").mkdir(parents=True)
     (env / "data" / "base.yaml").write_text("""\
@@ -63,7 +68,8 @@ node_same: 'x'
 intermediate_differs: 'top'
 """)
     (env / "data" / "groups" / "g1.yaml").write_text(
-        "intermediate_differs: 'middle'\n")
+        "intermediate_differs: 'middle'\n"
+    )
     (env / "data" / "nodes" / "web1.example.yaml").write_text("""\
 node_same: 'x'
 same_everywhere: 99
@@ -75,8 +81,10 @@ intermediate_differs: 'top'
 def run(tmp_path):
     code = build_tree(tmp_path)
     config = RunConfig(code_dir=code, global_hiera=None)
-    return analyse(config, [
-        Environment("production", code / "environments" / "production")])
+    return analyse(
+        config,
+        [Environment("production", code / "environments" / "production")],
+    )
 
 
 def redundant_map(result):

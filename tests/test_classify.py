@@ -18,10 +18,12 @@ class sshd (
 }
 """)
     (sshd / "manifests" / "conf.pp").write_text(
-        "define sshd::conf (String $line) { }\n")
+        "define sshd::conf (String $line) { }\n"
+    )
     (sshd / "templates").mkdir()
     (sshd / "templates" / "motd.erb").write_text(
-        "Banner <%= scope['sshd::motd_text'] %>\n")
+        "Banner <%= scope['sshd::motd_text'] %>\n"
+    )
     (sshd / "hiera.yaml").write_text("""\
 version: 5
 hierarchy:
@@ -30,12 +32,14 @@ hierarchy:
 """)
     (sshd / "data").mkdir()
     (sshd / "data" / "common.yaml").write_text(
-        "sshd::port: 22\nmodule_unused: 1\n")
+        "sshd::port: 22\nmodule_unused: 1\n"
+    )
 
     env = code / "environments" / "production"
     (env / "manifests").mkdir(parents=True)
     (env / "environment.conf").write_text(
-        "modulepath = site:modules:$basemodulepath\n")
+        "modulepath = site:modules:$basemodulepath\n"
+    )
     (env / "manifests" / "site.pp").write_text("""\
 # decommission note: mentioned_key still referenced by backup scripts
 node /^web/ {
@@ -47,14 +51,14 @@ $bad = lookup($oops)
 """)
     (env / "site" / "profile" / "manifests").mkdir(parents=True)
     (env / "site" / "profile" / "manifests" / "web.pp").write_text(
-        "class profile::web (String $vhost) {\n  include sshd\n}\n")
+        "class profile::web (String $vhost) {\n  include sshd\n}\n"
+    )
 
     shared = code / "hieradata"
     shared.mkdir()
-    (shared / "common.yaml").write_text(
-        "shared_used: 1\nshared_unused: 1\n")
+    (shared / "common.yaml").write_text("shared_used: 1\nshared_unused: 1\n")
 
-    (env / "hiera.yaml").write_text("""\
+    (env / "hiera.yaml").write_text(f"""\
 version: 5
 defaults:
   datadir: data
@@ -65,10 +69,10 @@ hierarchy:
       - base.yaml
       - secrets.yaml
   - name: shared
-    datadir: '%s'
+    datadir: '{shared}'
     paths:
       - common.yaml
-""" % shared)
+""")
     (env / "data").mkdir()
     (env / "data" / "base.yaml").write_text("""\
 profile::web::vhost: 'a.example'
@@ -111,21 +115,21 @@ def test_classification(tmp_path):
         return by_name[name].status
 
     # Strong consumers.
-    assert status("profile::web::vhost") == "USED"           # APL
+    assert status("profile::web::vhost") == "USED"  # APL
     assert by_name["profile::web::vhost"].reason.kind == "apl"
-    assert status("sshd::port") == "USED"                    # module data APL
-    assert status("sshd::extras") == "USED"                  # lookup() in pp
-    assert status("shared_used") == "USED"                   # shared layer
-    assert status("_hidden_secret") == "USED"                # alias chain
+    assert status("sshd::port") == "USED"  # module data APL
+    assert status("sshd::extras") == "USED"  # lookup() in pp
+    assert status("shared_used") == "USED"  # shared layer
+    assert status("_hidden_secret") == "USED"  # alias chain
     assert by_name["_hidden_secret"].reason.kind == "data_alias"
     assert status("lookup_options") == "USED"
     assert by_name["lookup_options"].reason.kind == "builtin"
 
     # Weak consumers.
-    assert status("sshd::motd_text") == "POSSIBLY_USED"      # erb scope[]
+    assert status("sshd::motd_text") == "POSSIBLY_USED"  # erb scope[]
     assert status("prefix::foo::setting") == "POSSIBLY_USED"
     assert by_name["prefix::foo::setting"].reason.kind == "dynamic_pattern"
-    assert status("mentioned_key") == "POSSIBLY_USED"        # comment
+    assert status("mentioned_key") == "POSSIBLY_USED"  # comment
     assert by_name["mentioned_key"].reason.kind == "mention"
     assert status("optioned_key") == "POSSIBLY_USED"
     assert by_name["optioned_key"].reason.kind == "lookup_options_ref"
@@ -140,7 +144,9 @@ def test_classification(tmp_path):
 
     # Annotations.
     assert status("profile::web::gone") == "UNUSED"
-    assert "has no parameter $gone" in by_name["profile::web::gone"].stale_param
+    assert (
+        "has no parameter $gone" in by_name["profile::web::gone"].stale_param
+    )
     assert status("sshd::conf::line") == "UNUSED"
     assert "defined type" in by_name["sshd::conf::line"].define_shape
 
@@ -170,6 +176,9 @@ def test_allowlist(tmp_path):
     assert not by_name["shared_unused"].allowlisted
     counts = result.counts()
     assert counts["allowlisted"] == 1
-    unused_names = [f.key.name for f in result.keys
-                    if f.status == "UNUSED" and not f.allowlisted]
+    unused_names = [
+        f.key.name
+        for f in result.keys
+        if f.status == "UNUSED" and not f.allowlisted
+    ]
     assert "unused_key" not in unused_names

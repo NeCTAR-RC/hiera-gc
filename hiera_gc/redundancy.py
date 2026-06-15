@@ -15,13 +15,13 @@ Keys consumed by merging lookups (hiera_array/hiera_hash/hiera_include,
 lookup with a merge, or lookup_options merge strategies) are excluded:
 every level contributes to a merge.
 """
+
 from __future__ import annotations
 
-import fnmatch
-import re
 from dataclasses import dataclass
+import fnmatch
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import re
 
 from hiera_gc.analysis import AnalysisResult
 from hiera_gc.checks import INTERP, hiera_pattern_to_regex
@@ -37,7 +37,7 @@ class RedundantFinding:
     line: int
     anchor_file: Path
     anchor_line: int
-    envs: List[str]
+    envs: list[str]
 
 
 @dataclass
@@ -47,21 +47,21 @@ class ShadowedFinding:
     line: int
     shadow_file: Path
     shadow_line: int
-    envs: List[str]
+    envs: list[str]
 
 
 @dataclass
 class _Def:
-    prio: Tuple[int, int, int]
+    prio: tuple[int, int, int]
     key: DataKey
     always: bool  # loaded for every node (interpolation-free pattern)
 
 
 def run_redundancy(result: AnalysisResult) -> None:
     inventory = result.inventory
-    indexes: Dict[str, ConsumerIndex] = result.indexes
+    indexes: dict[str, ConsumerIndex] = result.indexes
 
-    file_keys: Dict[Path, List[DataKey]] = {}
+    file_keys: dict[Path, list[DataKey]] = {}
     for key in inventory.keys:
         file_keys.setdefault(key.file, []).append(key)
 
@@ -69,15 +69,17 @@ def run_redundancy(result: AnalysisResult) -> None:
     for scan in inventory.scans.values():
         for entry in scan.entries:
             entry_scans.setdefault(
-                (entry.config_file, entry.index), []).append(scan)
+                (entry.config_file, entry.index), []
+            ).append(scan)
 
-    redundant_votes: Dict[DataKey, Dict[str, Tuple[Path, int]]] = {}
-    shadowed_votes: Dict[DataKey, Dict[str, Tuple[Path, int]]] = {}
+    redundant_votes: dict[DataKey, dict[str, tuple[Path, int]]] = {}
+    shadowed_votes: dict[DataKey, dict[str, tuple[Path, int]]] = {}
     merge_blocked = set()
 
     for env, index in indexes.items():
         defs_by_key = _collect_definitions(
-            env, inventory, result.scopes, entry_scans, file_keys)
+            env, inventory, result.scopes, entry_scans, file_keys
+        )
         for name, defs in defs_by_key.items():
             if len(defs) < 2:
                 continue
@@ -89,9 +91,10 @@ def run_redundancy(result: AnalysisResult) -> None:
     _aggregate(result, redundant_votes, shadowed_votes, merge_blocked)
 
 
-def _collect_definitions(env: str, inventory, scopes, entry_scans,
-                         file_keys) -> Dict[str, List[_Def]]:
-    raw: Dict[DataKey, List[Tuple[Tuple[int, int, int], bool]]] = {}
+def _collect_definitions(
+    env: str, inventory, scopes, entry_scans, file_keys
+) -> dict[str, list[_Def]]:
+    raw: dict[DataKey, list[tuple[tuple[int, int, int], bool]]] = {}
     for prio, entry, regex, always in _levels(env, inventory, scopes):
         for scan in entry_scans.get((entry.config_file, entry.index), ()):
             for info in scan.files:
@@ -100,12 +103,13 @@ def _collect_definitions(env: str, inventory, scopes, entry_scans,
                 for key in file_keys.get(info.file, ()):
                     raw.setdefault(key, []).append((prio, always))
 
-    defs_by_key: Dict[str, List[_Def]] = {}
+    defs_by_key: dict[str, list[_Def]] = {}
     for key, matches in raw.items():
         prio = min(m[0] for m in matches)
         always = any(m[1] for m in matches)
         defs_by_key.setdefault(key.name, []).append(
-            _Def(prio=prio, key=key, always=always))
+            _Def(prio=prio, key=key, always=always)
+        )
     for defs in defs_by_key.values():
         defs.sort(key=lambda d: d.prio)
     return defs_by_key
@@ -136,12 +140,16 @@ def _levels(env: str, inventory, scopes):
     for tier, entries in tiers:
         for entry in entries:
             for pattern_index, (pattern, is_glob) in enumerate(
-                    zip(entry.patterns, entry.glob_flags)):
-                regex = re.compile(
-                    hiera_pattern_to_regex(pattern, is_glob))
+                zip(entry.patterns, entry.glob_flags)
+            ):
+                regex = re.compile(hiera_pattern_to_regex(pattern, is_glob))
                 always = not INTERP.search(pattern)
-                yield ((tier, entry.index, pattern_index), entry, regex,
-                       always)
+                yield (
+                    (tier, entry.index, pattern_index),
+                    entry,
+                    regex,
+                    always,
+                )
 
 
 def _merge_excluded(name: str, index: ConsumerIndex) -> bool:
@@ -155,7 +163,8 @@ def _merge_excluded(name: str, index: ConsumerIndex) -> bool:
             return True
     for consumer in index.patterns:
         if consumer.merge and fnmatch.fnmatchcase(
-                name, consumer.pattern or ""):
+            name, consumer.pattern or ""
+        ):
             return True
     for entry in index.lookup_options:
         if entry.merge in (None, "first"):
@@ -171,23 +180,27 @@ def _merge_excluded(name: str, index: ConsumerIndex) -> bool:
     return False
 
 
-def _evaluate(env: str, defs: List[_Def], redundant_votes,
-              shadowed_votes) -> None:
+def _evaluate(
+    env: str, defs: list[_Def], redundant_votes, shadowed_votes
+) -> None:
     for position, definition in enumerate(defs):
-        below = defs[position + 1:]
+        below = defs[position + 1 :]
         anchor = _redundant_anchor(definition, below)
         if anchor is not None:
             redundant_votes.setdefault(definition.key, {})[env] = (
-                anchor.key.file, anchor.key.line)
+                anchor.key.file,
+                anchor.key.line,
+            )
             continue
         shadow = _shadowed_by(definition, defs[:position])
         if shadow is not None:
             shadowed_votes.setdefault(definition.key, {})[env] = (
-                shadow.key.file, shadow.key.line)
+                shadow.key.file,
+                shadow.key.line,
+            )
 
 
-def _redundant_anchor(definition: _Def,
-                      below: List[_Def]) -> Optional[_Def]:
+def _redundant_anchor(definition: _Def, below: list[_Def]) -> _Def | None:
     for candidate in below:
         if candidate.key.digest != definition.key.digest:
             return None  # an intermediate level overrides differently
@@ -196,37 +209,51 @@ def _redundant_anchor(definition: _Def,
     return None
 
 
-def _shadowed_by(definition: _Def, above: List[_Def]) -> Optional[_Def]:
+def _shadowed_by(definition: _Def, above: list[_Def]) -> _Def | None:
     for candidate in above:
-        if candidate.always and candidate.key.digest \
-                != definition.key.digest:
+        if candidate.always and candidate.key.digest != definition.key.digest:
             return candidate
     return None
 
 
-def _aggregate(result: AnalysisResult, redundant_votes, shadowed_votes,
-               merge_blocked) -> None:
+def _aggregate(
+    result: AnalysisResult, redundant_votes, shadowed_votes, merge_blocked
+) -> None:
     inventory = result.inventory
     scopes = result.scopes
-    for key, votes in sorted(redundant_votes.items(),
-                             key=lambda kv: (kv[0].name, str(kv[0].file))):
+    for key, votes in sorted(
+        redundant_votes.items(), key=lambda kv: (kv[0].name, str(kv[0].file))
+    ):
         if key in merge_blocked:
             continue
         envs = visible_envs(key, inventory, scopes)
         if envs and set(envs) <= set(votes):
             anchor_file, anchor_line = votes[envs[0]]
-            result.redundant.append(RedundantFinding(
-                key=key.name, file=key.file, line=key.line,
-                anchor_file=anchor_file, anchor_line=anchor_line,
-                envs=envs))
-    for key, votes in sorted(shadowed_votes.items(),
-                             key=lambda kv: (kv[0].name, str(kv[0].file))):
+            result.redundant.append(
+                RedundantFinding(
+                    key=key.name,
+                    file=key.file,
+                    line=key.line,
+                    anchor_file=anchor_file,
+                    anchor_line=anchor_line,
+                    envs=envs,
+                )
+            )
+    for key, votes in sorted(
+        shadowed_votes.items(), key=lambda kv: (kv[0].name, str(kv[0].file))
+    ):
         if key in merge_blocked or key in redundant_votes:
             continue
         envs = visible_envs(key, inventory, scopes)
         if envs and set(envs) <= set(votes):
             shadow_file, shadow_line = votes[envs[0]]
-            result.shadowed.append(ShadowedFinding(
-                key=key.name, file=key.file, line=key.line,
-                shadow_file=shadow_file, shadow_line=shadow_line,
-                envs=envs))
+            result.shadowed.append(
+                ShadowedFinding(
+                    key=key.name,
+                    file=key.file,
+                    line=key.line,
+                    shadow_file=shadow_file,
+                    shadow_line=shadow_line,
+                    envs=envs,
+                )
+            )

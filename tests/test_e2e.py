@@ -14,11 +14,11 @@ def code_dir(tmp_path):
     code = tmp_path / "code"
     shared = code / "hieradata"
     shared.mkdir(parents=True)
-    (shared / "common.yaml").write_text("""\
-shared_used: '%s'
-shared_unused: '%s'
-duplicated_key: 'sameval %s'
-""" % (CANARY, CANARY, CANARY))
+    (shared / "common.yaml").write_text(f"""\
+shared_used: '{CANARY}'
+shared_unused: '{CANARY}'
+duplicated_key: 'sameval {CANARY}'
+""")
 
     sshd = code / "modules" / "sshd"
     (sshd / "manifests").mkdir(parents=True)
@@ -26,13 +26,16 @@ duplicated_key: 'sameval %s'
         "class sshd (String $port = '22') {\n"
         "  $x = lookup('shared_used')\n"
         "  $y = lookup($runtime_key)\n"
-        "}\n")
+        "}\n"
+    )
 
     env = code / "environments" / "production"
     (env / "manifests").mkdir(parents=True)
     (env / "manifests" / "site.pp").write_text(
-        "node /^web/ { include sshd }\n")
-    (env / "hiera.yaml").write_text("""\
+        "node /^web/ { include sshd }\n"
+    )
+    (env / "hiera.yaml").write_text(
+        """\
 version: 5
 hierarchy:
   - name: env
@@ -46,22 +49,27 @@ hierarchy:
     datadir: '@SHARED@'
     paths:
       - common.yaml
-""".replace("@SHARED@", str(shared)))
+""".replace("@SHARED@", str(shared))
+    )
     (env / "data" / "nodes").mkdir(parents=True)
     (env / "data" / "orphandir").mkdir(parents=True)
-    (env / "data" / "base.yaml").write_text("""\
+    (env / "data" / "base.yaml").write_text(f"""\
 sshd::port: '2222'
-duplicated_key: 'sameval %s'
-unused_env_key: '%s'
-""" % (CANARY, CANARY))
+duplicated_key: 'sameval {CANARY}'
+unused_env_key: '{CANARY}'
+""")
     (env / "data" / "secrets.eyaml").write_text(
-        "_unused_secret: ENC[GPG,%sbase64==]\n" % CANARY)
+        f"_unused_secret: ENC[GPG,{CANARY}base64==]\n"
+    )
     (env / "data" / "extra.json").write_text(
-        '{"unused_json_key": "%s"}\n' % CANARY)
+        f'{{"unused_json_key": "{CANARY}"}}\n'
+    )
     (env / "data" / "orphandir" / "dead.yaml").write_text(
-        "orphan_key: '%s'\n" % CANARY)
+        f"orphan_key: '{CANARY}'\n"
+    )
     (env / "data" / "nodes" / "gone.example.yaml").write_text(
-        "node_key: '%s'\n" % CANARY)
+        f"node_key: '{CANARY}'\n"
+    )
     return code
 
 
@@ -75,24 +83,37 @@ ALL_MODES = [
     ["--format", "text"],
     ["--format", "json"],
     ["--format", "text", "-vv", "--stats"],
-    ["--format", "json", "--show",
-     "unused,possibly_used,redundant,shadowed,orphans,stale_files,"
-     "warnings"],
+    [
+        "--format",
+        "json",
+        "--show",
+        "unused,possibly_used,redundant,shadowed,orphans,stale_files,warnings",
+    ],
 ]
 
 
 @pytest.mark.parametrize("mode", ALL_MODES)
 def test_canary_never_leaks(code_dir, capsys, mode):
     _, out, err = run_cli(
-        capsys, "--code-dir", str(code_dir), "--global-hiera",
-        str(code_dir / "nope.yaml"), *mode)
+        capsys,
+        "--code-dir",
+        str(code_dir),
+        "--global-hiera",
+        str(code_dir / "nope.yaml"),
+        *mode,
+    )
     assert CANARY not in out
     assert CANARY not in err
 
 
 def test_findings_present_in_text_report(code_dir, capsys):
-    code, out, _ = run_cli(capsys, "--code-dir", str(code_dir),
-                           "--global-hiera", str(code_dir / "nope.yaml"))
+    code, out, _ = run_cli(
+        capsys,
+        "--code-dir",
+        str(code_dir),
+        "--global-hiera",
+        str(code_dir / "nope.yaml"),
+    )
     assert code == 1  # unused findings exist
     assert "UNUSED KEYS" in out
     assert "unused_env_key" in out
@@ -112,9 +133,15 @@ def test_findings_present_in_text_report(code_dir, capsys):
 
 
 def test_json_report_round_trips(code_dir, capsys):
-    code, out, _ = run_cli(capsys, "--code-dir", str(code_dir),
-                           "--format", "json",
-                           "--global-hiera", str(code_dir / "nope.yaml"))
+    code, out, _ = run_cli(
+        capsys,
+        "--code-dir",
+        str(code_dir),
+        "--format",
+        "json",
+        "--global-hiera",
+        str(code_dir / "nope.yaml"),
+    )
     assert code == 1
     doc = json.loads(out)
     assert doc["schema_version"] == 1
@@ -126,25 +153,42 @@ def test_json_report_round_trips(code_dir, capsys):
     assert any("dead.yaml" in o["file"] for o in doc["orphaned_files"])
 
 
-@pytest.mark.parametrize("fail_on,expected", [
-    ("unused", 1),
-    ("none", 0),
-    ("stale_params", 0),  # tree has no stale params
-    ("redundant", 1),
-    ("orphans,stale_files", 1),
-])
+@pytest.mark.parametrize(
+    "fail_on,expected",
+    [
+        ("unused", 1),
+        ("none", 0),
+        ("stale_params", 0),  # tree has no stale params
+        ("redundant", 1),
+        ("orphans,stale_files", 1),
+    ],
+)
 def test_fail_on_matrix(code_dir, capsys, fail_on, expected):
-    code, _, _ = run_cli(capsys, "--code-dir", str(code_dir),
-                         "--global-hiera", str(code_dir / "nope.yaml"),
-                         "--fail-on", fail_on)
+    code, _, _ = run_cli(
+        capsys,
+        "--code-dir",
+        str(code_dir),
+        "--global-hiera",
+        str(code_dir / "nope.yaml"),
+        "--fail-on",
+        fail_on,
+    )
     assert code == expected
 
 
 def test_output_to_file(code_dir, tmp_path, capsys):
     target = tmp_path / "report.json"
-    code, out, _ = run_cli(capsys, "--code-dir", str(code_dir),
-                           "--format", "json", "--output", str(target),
-                           "--global-hiera", str(code_dir / "nope.yaml"))
+    code, out, _ = run_cli(
+        capsys,
+        "--code-dir",
+        str(code_dir),
+        "--format",
+        "json",
+        "--output",
+        str(target),
+        "--global-hiera",
+        str(code_dir / "nope.yaml"),
+    )
     assert out == ""
     doc = json.loads(target.read_text())
     assert doc["schema_version"] == 1
@@ -154,7 +198,12 @@ def test_output_to_file(code_dir, tmp_path, capsys):
 def test_strict_mode_fails_on_parse_errors(code_dir, capsys):
     bad = code_dir / "environments" / "production" / "data" / "bad.yaml"
     bad.write_text("a: 1\n  b: [broken\n")
-    code, _, _ = run_cli(capsys, "--code-dir", str(code_dir),
-                         "--global-hiera", str(code_dir / "nope.yaml"),
-                         "--strict")
+    code, _, _ = run_cli(
+        capsys,
+        "--code-dir",
+        str(code_dir),
+        "--global-hiera",
+        str(code_dir / "nope.yaml"),
+        "--strict",
+    )
     assert code == 2
