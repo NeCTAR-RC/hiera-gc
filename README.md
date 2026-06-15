@@ -42,7 +42,7 @@ A test suite canary asserts no value can reach the output.
 
 ## Installation
 
-Requires Python >= 3.8 and PyYAML. Either:
+Requires Python >= 3.10 and PyYAML. Either:
 
 ```
 pip install .
