@@ -18,7 +18,7 @@ dependencies = [
 hiera-gc = "hiera_gc.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+include = ["hiera_gc*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
