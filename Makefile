@@ -10,8 +10,8 @@ zipapp:
 	$(PYTHON) -m zipapp build/zipapp \
 		-m "hiera_gc.cli:entry" \
 		-p "/usr/bin/env python3" \
-		-o dist/hiera-gc.pyz
-	@echo "built dist/hiera-gc.pyz"
+		-o dist/hiera-gc
+	@echo "built dist/hiera-gc"
 
 test:
 	tox

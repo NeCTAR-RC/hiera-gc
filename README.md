@@ -53,8 +53,8 @@ puppetserver:
 
 ```
 make zipapp
-scp dist/hiera-gc.pyz puppet:/tmp/
-ssh puppet python3 /tmp/hiera-gc.pyz --stats
+scp dist/hiera-gc puppet:/tmp/
+ssh puppet python3 /tmp/hiera-gc --stats
 ```
 
 ## Usage
