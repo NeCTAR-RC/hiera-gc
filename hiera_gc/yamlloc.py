@@ -8,11 +8,11 @@ and values can be digested without ever leaving this module.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 import hashlib
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 import yaml
 

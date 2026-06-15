@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 from hiera_gc.analysis import Warn
 from hiera_gc.consumers.epp import extract_epp
@@ -26,7 +25,7 @@ MENTION_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_:.\-]*")
 #: crowd out a real mention elsewhere.
 MENTION_CAP = 8
 
-MentionMap = Dict[str, List[Tuple[Path, int]]]
+MentionMap = dict[str, list[tuple[Path, int]]]
 
 
 @dataclass
