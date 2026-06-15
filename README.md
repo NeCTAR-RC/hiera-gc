@@ -68,7 +68,7 @@ hiera-gc [--code-dir /etc/puppetlabs/code] \
          [--show unused,possibly_used,redundant,...] \
          [--fail-on unused,redundant] \
          [--allowlist allow.txt] [--extra-datadir PATH] \
-         [--fix ENV] [--fix-kinds unused,redundant,...] [--dry-run] \
+         [--fix --env production] [--fix-kinds unused,redundant,...] [--dry-run] \
          [--strict] [--stats] [-v]
 ```
 
@@ -97,20 +97,22 @@ Allowlisted keys are never fixed.
 
 ## Fixing findings
 
-`--fix ENV` removes fixable findings, restricted to exactly one
-environment per run:
+`--fix` removes fixable findings from the one environment named by
+`--env`. It acts on exactly one environment per run, so `--env` is
+mandatory and must name a single environment (`--fix` will not fix
+every environment at once, and cannot be combined with `--env-glob`):
 
 ```
-hiera-gc --fix production --dry-run        # show what would change
-hiera-gc --fix production --fail-on none   # apply it
+hiera-gc --fix --env production --dry-run        # show what would change
+hiera-gc --fix --env production --fail-on none   # apply it
 ```
 
 - Only data files inside that environment's own directory are
   touched, so each run yields one reviewable commit in one repo.
   Findings in shared, global or module layer data (visible to other
-  environments, and module data is usually vendored by r10k) and in
-  other environments are listed as out of scope; run `--fix` again
-  per environment for the rest.
+  environments, and module data is usually vendored by r10k) are
+  listed as out of scope; run `--fix --env NAME` again per environment
+  for the rest.
 - `--fix-kinds` selects what to fix: `unused`, `stale_params` (just
   the stale-parameter subset of unused), `redundant` (removes the
   higher-priority copy), `orphans` and `stale_files` (deletes the

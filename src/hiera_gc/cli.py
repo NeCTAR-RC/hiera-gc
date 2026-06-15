@@ -124,11 +124,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--fix",
-        metavar="ENV",
-        help="Remove fixable findings from this environment's own data "
-        "files. Exactly one environment per run; findings in shared, "
-        "global or module data and in other environments are reported "
-        "as out of scope",
+        action="store_true",
+        help="Remove fixable findings from the --env environment's own "
+        "data files. Requires exactly one --env (so a run never fixes "
+        "every environment at once); findings in shared, global or "
+        "module data are reported as out of scope",
     )
     parser.add_argument(
         "--fix-kinds",
@@ -173,6 +173,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     if "none" in args.fail_on:
         args.fail_on = []
 
+    if args.fix:
+        if not args.env:
+            parser.error("--fix requires --env NAME: it removes a single "
+                         "environment's own findings and will not fix "
+                         "every environment at once")
+        if len(args.env) > 1:
+            parser.error("--fix acts on exactly one environment per run; "
+                         "give a single --env NAME")
+        if args.env_glob:
+            parser.error("--fix cannot be combined with --env-glob; name "
+                         "the one environment with --env")
     if args.dry_run and not args.fix:
         parser.error("--dry-run requires --fix")
     if args.fix_kinds is not None and not args.fix:
@@ -214,13 +225,6 @@ def main(argv: Optional[List[str]] = None) -> int:
               % ", ".join(str(r) for r in roots), file=sys.stderr)
         return EXIT_ERROR
 
-    if args.fix and args.fix not in [e.name for e in environments]:
-        print("hiera-gc: --fix environment '%s' is not among the "
-              "analysed environments (%s)"
-              % (args.fix, ", ".join(e.name for e in environments)),
-              file=sys.stderr)
-        return EXIT_ERROR
-
     from hiera_gc.analysis import Warn, analyse
     from hiera_gc.report import render_json, render_text
 
@@ -237,7 +241,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                   % len(result.parse_errors), file=sys.stderr)
             return EXIT_ERROR
         from hiera_gc.fix import apply_fixes, plan_fixes
-        plan = plan_fixes(result, args.fix, args.fix_kinds)
+        plan = plan_fixes(result, args.env[0], args.fix_kinds)
         apply_fixes(plan, dry_run=args.dry_run)
 
     if args.format == "json":

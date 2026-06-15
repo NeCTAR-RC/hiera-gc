@@ -118,8 +118,8 @@ def tree_snapshot(code_dir):
 
 def test_dry_run_changes_nothing(code_dir, capsys):
     before = tree_snapshot(code_dir)
-    code, out, _ = run_cli(capsys, code_dir, "--fix", "production",
-                           "--dry-run", "--fail-on", "none")
+    code, out, _ = run_cli(capsys, code_dir, "--env", "production",
+                           "--fix", "--dry-run", "--fail-on", "none")
     assert code == 0
     assert tree_snapshot(code_dir) == before
     assert "FIXES  (environment: production, dry run)" in out
@@ -129,8 +129,8 @@ def test_dry_run_changes_nothing(code_dir, capsys):
 
 
 def test_fix_rewrites_only_the_target_environment(code_dir, capsys):
-    code, out, _ = run_cli(capsys, code_dir, "--fix", "production",
-                           "--fail-on", "none")
+    code, out, _ = run_cli(capsys, code_dir, "--env", "production",
+                           "--fix", "--fail-on", "none")
     assert code == 0
     env_data = code_dir / "environments" / "production" / "data"
 
@@ -156,8 +156,8 @@ def test_fix_rewrites_only_the_target_environment(code_dir, capsys):
 
 
 def test_fix_json_actions_skips_and_scope(code_dir, capsys):
-    code, out, _ = run_cli(capsys, code_dir, "--fix", "production",
-                           "--format", "json", "--fail-on", "none")
+    code, out, _ = run_cli(capsys, code_dir, "--env", "production",
+                           "--fix", "--format", "json", "--fail-on", "none")
     assert code == 0
     fixes = json.loads(out)["fixes"]
     assert fixes["environment"] == "production"
@@ -188,21 +188,23 @@ def test_fix_json_actions_skips_and_scope(code_dir, capsys):
     assert "duplicate" in reasons["dup_key"]
     assert "flow-style" in reasons["unused_json_key"]
 
-    # shared_unused and staging_unused are out of scope; nothing else.
-    assert fixes["out_of_scope"] == {"unused": 2}
+    # shared_unused is out of scope (shared layer); staging is not
+    # analysed in a production run, so nothing else is counted.
+    assert fixes["out_of_scope"] == {"unused": 1}
 
 
 def test_fix_is_idempotent(code_dir, capsys):
-    run_cli(capsys, code_dir, "--fix", "production", "--fail-on", "none")
-    code, out, _ = run_cli(capsys, code_dir, "--fix", "production",
-                           "--format", "json", "--fail-on", "none")
+    run_cli(capsys, code_dir, "--env", "production", "--fix",
+            "--fail-on", "none")
+    code, out, _ = run_cli(capsys, code_dir, "--env", "production",
+                           "--fix", "--format", "json", "--fail-on", "none")
     assert code == 0
     assert json.loads(out)["fixes"]["actions"] == []
 
 
 def test_fix_other_env_collects_its_findings(code_dir, capsys):
-    code, out, _ = run_cli(capsys, code_dir, "--fix", "staging",
-                           "--format", "json", "--fail-on", "none")
+    code, out, _ = run_cli(capsys, code_dir, "--env", "staging",
+                           "--fix", "--format", "json", "--fail-on", "none")
     assert code == 0
     fixes = json.loads(out)["fixes"]
     removed = {a["key"] for a in fixes["actions"]}
@@ -215,20 +217,34 @@ def test_fix_other_env_collects_its_findings(code_dir, capsys):
             / "base.yaml").read_text() == BASE_YAML
 
 
-def test_fix_env_must_be_analysed(code_dir, capsys):
+def test_fix_requires_a_single_env(code_dir, capsys):
     before = tree_snapshot(code_dir)
-    code, _, err = run_cli(capsys, code_dir, "--env", "staging",
-                           "--fix", "production")
+    # --fix with no --env: must refuse, so it can never fix all envs.
+    with pytest.raises(SystemExit) as exc:
+        main(["--code-dir", str(code_dir), "--fix"])
+    assert exc.value.code == 2
+    # --fix with more than one --env: ambiguous target, refused.
+    with pytest.raises(SystemExit) as exc:
+        main(["--code-dir", str(code_dir), "--fix",
+              "--env", "production", "--env", "staging"])
+    assert exc.value.code == 2
+    # --fix with --env-glob: could match several, refused.
+    with pytest.raises(SystemExit) as exc:
+        main(["--code-dir", str(code_dir), "--fix", "--env-glob", "prod*"])
+    assert exc.value.code == 2
+    assert tree_snapshot(code_dir) == before
+
+
+def test_fix_env_must_exist(code_dir, capsys):
+    before = tree_snapshot(code_dir)
+    code, _, err = run_cli(capsys, code_dir, "--env", "bogus", "--fix")
     assert code == 2
-    assert "not among the analysed environments" in err
-    code, _, err = run_cli(capsys, code_dir, "--fix", "bogus")
-    assert code == 2
-    assert "not among the analysed environments" in err
+    assert "no environments found" in err
     assert tree_snapshot(code_dir) == before
 
 
 def test_fix_kinds_filter(code_dir, capsys):
-    code, out, _ = run_cli(capsys, code_dir, "--fix", "production",
+    code, out, _ = run_cli(capsys, code_dir, "--env", "production", "--fix",
                            "--fix-kinds", "stale_params",
                            "--format", "json", "--fail-on", "none")
     assert code == 0
@@ -243,7 +259,7 @@ def test_fix_kinds_filter(code_dir, capsys):
 
 
 def test_fix_kinds_orphans_only(code_dir, capsys):
-    code, _, _ = run_cli(capsys, code_dir, "--fix", "production",
+    code, _, _ = run_cli(capsys, code_dir, "--env", "production", "--fix",
                          "--fix-kinds", "orphans", "--fail-on", "none")
     assert code == 0
     env_data = code_dir / "environments" / "production" / "data"
@@ -256,17 +272,17 @@ def test_fix_refused_on_parse_errors(code_dir, capsys):
     bad = code_dir / "environments" / "production" / "data" / "bad.yaml"
     bad.write_text("a: 1\n  b: [broken\n")
     before = tree_snapshot(code_dir)
-    code, _, err = run_cli(capsys, code_dir, "--fix", "production")
+    code, _, err = run_cli(capsys, code_dir, "--env", "production", "--fix")
     assert code == 2
     assert "refusing to fix" in err
     assert tree_snapshot(code_dir) == before
 
 
 @pytest.mark.parametrize("mode", [
-    ["--fix", "production"],
-    ["--fix", "production", "--dry-run"],
-    ["--fix", "production", "--format", "json"],
-    ["--fix", "production", "--dry-run", "--format", "json", "-vv",
+    ["--env", "production", "--fix"],
+    ["--env", "production", "--fix", "--dry-run"],
+    ["--env", "production", "--fix", "--format", "json"],
+    ["--env", "production", "--fix", "--dry-run", "--format", "json", "-vv",
      "--stats"],
 ])
 def test_canary_never_leaks_with_fix(code_dir, capsys, mode):
@@ -289,6 +305,6 @@ def test_fix_kinds_requires_fix(code_dir, capsys):
 
 def test_bad_fix_kind_rejected(code_dir, capsys):
     with pytest.raises(SystemExit) as exc:
-        main(["--code-dir", str(code_dir), "--fix", "production",
+        main(["--code-dir", str(code_dir), "--env", "production", "--fix",
               "--fix-kinds", "shadowed"])
     assert exc.value.code == 2
