@@ -84,6 +84,18 @@ hiera-gc [--code-dir /etc/puppetlabs/code] \
   environment name appears under more than one root the first wins (the
   rest are reported as shadowed), matching Puppet. `--env` and
   `--env-glob` filter across all roots.
+- When `--env` or `--env-glob` narrows the run to a single environment,
+  the report (and the exit status) covers only that environment's own
+  files. Findings and warnings about shared, global or module data are
+  visible to other environments the run did not analyse, so they are
+  unreliable here as well as not fixable from this environment; they are
+  listed by an all-environments run (no `--env` filter, or one matching
+  more than one environment) instead. Warnings about files outside the
+  environment's own tree (a module's hiera.yaml, a `lookup()` in a module
+  manifest) are dropped the same way, except parse errors, which are kept
+  because a file that fails to parse blinds the analysis. The report
+  names the environment and how many findings it hid. This matches the
+  scope of `--fix`.
 - `environment.conf` modulepath entries (e.g.
   `site:modules:$basemodulepath`) are honoured.
 - Exit codes: 0 clean, 1 findings matched `--fail-on`, 2 usage or

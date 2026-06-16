@@ -242,6 +242,7 @@ def _resolve_datadirs(
                     "hiera_config",
                     f"{context}: interpolated datadir {raw!r} matches no directories "
                     f"(tried {pattern})",
+                    file=str(entry.config_file),
                 )
             )
         return [Path(p).resolve() for p in matches]
@@ -257,6 +258,7 @@ def _resolve_datadirs(
                     Warn(
                         "hiera_config",
                         f"{context}: datadir {raw} not found; rebased under code dir as {candidate}",
+                        file=str(entry.config_file),
                     )
                 )
                 return [candidate.resolve()]
@@ -267,6 +269,7 @@ def _resolve_datadirs(
                     "hiera_config",
                     f"{context}: datadir {raw} not found; using {candidate} from the code dir "
                     "instead",
+                    file=str(entry.config_file),
                 )
             )
             return [candidate.resolve()]
@@ -283,7 +286,11 @@ def _resolve_datadirs(
     if path.is_dir():
         return [path.resolve()]
     inv.warnings.append(
-        Warn("hiera_config", f"{context}: datadir {path} does not exist")
+        Warn(
+            "hiera_config",
+            f"{context}: datadir {path} does not exist",
+            file=str(entry.config_file),
+        )
     )
     return []
 

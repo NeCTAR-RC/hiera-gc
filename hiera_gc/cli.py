@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_ERROR
 
-    from hiera_gc.analysis import Warn, analyse
+    from hiera_gc.analysis import Warn, analyse, restrict_to_environment
     from hiera_gc.report import render_json, render_text
 
     result = analyse(config, environments)
@@ -258,6 +258,13 @@ def main(argv: list[str] | None = None) -> int:
 
         plan = plan_fixes(result, args.env[0], args.fix_kinds)
         apply_fixes(plan, dry_run=args.dry_run)
+
+    # When a run is narrowed to a single environment, report and fail on
+    # only that environment's own data; shared, global and module findings
+    # belong to an all-environments run. Done after fix planning so the
+    # fixer's own out-of-scope tally still reflects the full picture.
+    if (config.envs or config.env_glob) and len(result.environments) == 1:
+        restrict_to_environment(result, result.environments[0])
 
     if args.format == "json":
         text = render_json(result, show=args.show, fixes=plan)

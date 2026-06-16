@@ -43,6 +43,24 @@ def render_text(result: AnalysisResult, show: list[str], fixes=None) -> str:
     )
     out.append("")
 
+    if result.restricted_env:
+        note = (
+            f"Restricted to environment '{result.restricted_env}': showing "
+            "only findings in its own data files. Shared, global and module "
+            "data is reported by an all-environments run."
+        )
+        suppressed = result.restricted_suppressed
+        if suppressed:
+            note += "  ({} hidden: {})".format(
+                sum(suppressed.values()),
+                ", ".join(
+                    f"{kind}={count}"
+                    for kind, count in sorted(suppressed.items())
+                ),
+            )
+        out.append(note)
+        out.append("")
+
     active = [f for f in result.keys if not f.allowlisted]
     if "unused" in show:
         _render_unused(
@@ -252,6 +270,11 @@ def render_json(result: AnalysisResult, show: list[str], fixes=None) -> str:
         "code_dir": str(code_dir),
         "environments": result.environments,
         "summary": result.counts(),
+        # Non-null when the run was narrowed to one environment and only
+        # its own data is reported; restricted_suppressed counts the
+        # findings in shared/global/module data omitted as a result.
+        "restricted_to": result.restricted_env,
+        "restricted_suppressed": result.restricted_suppressed,
     }
 
     statuses = set()

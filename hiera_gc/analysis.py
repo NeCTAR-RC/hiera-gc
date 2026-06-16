@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from hiera_gc.config import Environment, RunConfig
 
@@ -33,6 +34,12 @@ class AnalysisResult:
     inventory: object = None
     scopes: dict[str, object] = field(default_factory=dict)
     indexes: dict[str, object] = field(default_factory=dict)
+    # Set by restrict_to_environment() when a run is narrowed to a
+    # single environment: the environment name, and the per-section
+    # count of findings hidden because they live in shared/global/module
+    # data (which other, unanalysed environments may consume or own).
+    restricted_env: str | None = None
+    restricted_suppressed: dict[str, int] = field(default_factory=dict)
 
     @property
     def parse_errors(self) -> list[Warn]:
@@ -142,6 +149,106 @@ def analyse(
         }
     )
     return result
+
+
+#: Disjoint report sections whose suppression is tallied for the note;
+#: stale_params is omitted because it is a subset of unused.
+_RESTRICT_SECTIONS = (
+    "unused",
+    "possibly_used",
+    "orphans",
+    "stale_files",
+    "redundant",
+    "shadowed",
+)
+
+
+def restrict_to_environment(
+    result: AnalysisResult, env: str
+) -> dict[str, int]:
+    """Trim findings to those that live in ``env``'s own environment-layer
+    data.
+
+    A run narrowed to a single environment should report and fail on only
+    what can be acted on inside that one environment, matching what
+    ``--fix`` would touch. Shared, global and module layer findings are
+    visible to other environments that this run did not analyse, so
+    reporting them here would be both unfixable from this environment's
+    repository and unreliable (another environment may consume the key).
+    Those findings are surfaced by an all-environments run instead.
+
+    Mutates ``result`` in place, records the restriction on it and returns
+    the per-section count of findings removed.
+    """
+    inventory = result.inventory
+    scan_by_path: dict[str, object] = {}
+    if inventory is not None:
+        for path, scan in inventory.file_scan.items():
+            scan_by_path[str(path)] = scan
+            scan_by_path[str(path.resolve())] = scan
+
+    def in_env_data(file) -> bool:
+        scan = scan_by_path.get(str(file))
+        return (
+            scan is not None
+            and scan.layer == "environment"
+            and scan.env == env
+        )
+
+    before = result.counts()
+    result.keys = [
+        f
+        for f in result.keys
+        if f.key.layer == "environment" and f.key.env == env
+    ]
+    result.orphans = [
+        o for o in result.orphans if o.layer == "environment" and o.env == env
+    ]
+    result.stale_files = [s for s in result.stale_files if s.env == env]
+    result.redundant = [r for r in result.redundant if in_env_data(r.file)]
+    result.shadowed = [s for s in result.shadowed if in_env_data(s.file)]
+    scope = result.scopes.get(env)
+    result.warnings = [w for w in result.warnings if _warning_in_env(w, scope)]
+    after = result.counts()
+
+    suppressed = {
+        section: before[section] - after[section]
+        for section in _RESTRICT_SECTIONS
+        if before[section] - after[section] > 0
+    }
+    result.restricted_env = env
+    result.restricted_suppressed = suppressed
+    return suppressed
+
+
+def _warning_in_env(warn: Warn, scope) -> bool:
+    """Whether a warning belongs to the restricted environment's own tree.
+
+    A warning is kept when its file lives directly under the environment's
+    directory and not inside one of its modules: that is the environment's
+    own data, manifests, templates and config. Warnings about shared,
+    global or module files (a module's hiera.yaml, a ``lookup()`` in a
+    module manifest, an empty module data file) are dropped; an
+    all-environments run reports them.
+
+    Parse errors are kept regardless of location because a file the
+    analyser could not read blinds every environment that can see it, and
+    ``--strict`` / ``--fix`` depend on seeing them. Warnings with no file
+    (a missing global hiera.yaml, a skipped stale-file check) are general
+    diagnostics and kept. If the scope is unavailable the warning is kept.
+    """
+    if warn.kind == "parse_error" or not warn.file:
+        return True
+    if scope is None:
+        return True
+    file = Path(warn.file)
+    if not _is_under(file, scope.env.path):
+        return False  # shared, global or another environment's tree
+    # Under the environment directory, but a site module placed there
+    # (e.g. <env>/modules/<name>) is module layer, not the env's own.
+    return not any(
+        _is_under(file, module_dir) for module_dir in scope.modules.values()
+    )
 
 
 def _is_under(path, root) -> bool:
