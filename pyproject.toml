@@ -10,9 +10,38 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 authors = [{name = "ARDC Nectar"}]
+keywords = [
+    "puppet",
+    "hiera",
+    "yaml",
+    "static-analysis",
+    "linter",
+    "dead-code",
+    "configuration-management",
+    "devops",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "PyYAML",
 ]
+
+[project.urls]
+Homepage = "https://github.com/NeCTAR-RC/hiera-gc"
+Repository = "https://github.com/NeCTAR-RC/hiera-gc"
+Issues = "https://github.com/NeCTAR-RC/hiera-gc/issues"
 
 [project.scripts]
 hiera-gc = "hiera_gc.cli:main"
