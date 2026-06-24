@@ -1,0 +1,22 @@
+# hiera-gc allowlist for the autofix job
+#
+# One Python regular expression per line. Text after '#' is ignored. A Hiera
+# key whose full name matches any line is reported separately and never fixed.
+#
+# Use this for keys consumed by systems hiera-gc cannot see, so the unattended
+# job does not remove live data:
+#   * cron jobs or scripts that run `puppet lookup`
+#   * monitoring and alerting that reads Hiera directly
+#   * other repositories or tooling that consume these keys
+#
+# Matching is on the full key name with re.search, so anchor with ^ and $ when
+# you mean an exact key. Examples:
+
+# An exact key consumed by an external monitoring script:
+# ^monitoring::contact_email$
+
+# A whole namespace owned by another team's tooling:
+# ^external_tooling::
+
+# A family of keys read by a cron job running puppet lookup:
+# ^backups::schedule_.*$

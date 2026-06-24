@@ -1,0 +1,35 @@
+# hiera-gc-autofix environments
+#
+# One environment per line. Blank lines and text after '#' are ignored.
+# Fields are whitespace-separated:
+#
+#   repo_dir   [env]   [code_dir]
+#
+#   repo_dir   The git work tree the script fetches, resets, commits and
+#              pushes from. It must contain a .gitreview file.
+#   env        Optional. The environment name passed to hiera-gc --env.
+#   code_dir   Optional. Passed to hiera-gc --code-dir.
+#
+# The script auto-detects the layout of each checkout:
+#
+#   * Self-environment checkout: repo_dir is itself an environment (it has a
+#     hiera.yaml at its root, alongside data/, manifests/, modules/). This is
+#     the common r10k dev-environment case. The environment name is the
+#     directory name, the parent directory is used as the environments root
+#     (hiera-gc --env-dir), and code_dir defaults to /etc/puppetlabs/code so
+#     global modules and shared hieradata are visible. For these, repo_dir
+#     alone is enough; env is taken from the directory name.
+#
+#   * Full code tree: repo_dir contains environments/<env>. Give the env name;
+#     code_dir defaults to repo_dir.
+#
+# These should be deployed automation clones (modules resolved into modules/,
+# or available in the global modules dir), since each run hard-resets the
+# checkout to the Gerrit branch tip.
+
+# Self-environment r10k dev-environment checkouts (env = directory name):
+/etc/puppetlabs/code/dev_environments/sam_ardctest_default
+/etc/puppetlabs/code/dev_environments/sam_rctest_default
+
+# A full code tree where the env lives at environments/production:
+# /srv/puppet-autofix/control-repo   production

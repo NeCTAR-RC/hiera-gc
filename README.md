@@ -160,6 +160,70 @@ Treat the report as a list of removal candidates, not a verdict:
 Remove data in small batches and watch catalog compilation (e.g. an
 r10k catalog-diff run) before merging.
 
+## Periodic automated cleanup
+
+`scripts/hiera-gc-autofix.sh` runs `--fix` over a set of Puppet
+environment git checkouts and proposes the cleanup to Gerrit (via
+`git review`), unattended and on a schedule. It is built to be run from
+cron and to be idempotent: if an automated review for an environment is
+still open (not merged), the next run reuses that change's Change-Id so
+Gerrit records a new patchset instead of opening a second review. It
+finds the open review with a live `gerrit query` (`status:open` plus a
+fixed topic), so a review that has merged or been abandoned is never
+mistaken for a current one.
+
+The commit message is value-free and carries no environment name (the
+repo it lands in identifies the environment); file paths are shown
+relative to the environment root.
+
+It pushes for review only and never approves or submits, so the human
+plus catalog-diff review described above stays the gate before anything
+merges. Other guard rails: it refuses to fix a checkout whose modules
+are not deployed (a blind analysis would delete live data), stages only
+the files `--fix` changed, and isolates its own reviews by topic and a
+marker trailer so it coexists with other tooling on the same repos.
+
+List the environments in a config file (see
+`scripts/hiera-gc-autofix.conf.example`), one per line. The script
+auto-detects the layout of each checkout. A checkout that is itself an
+environment (a `hiera.yaml` at its root, as r10k dev environments are)
+needs only its path: the environment name is the directory name, its
+parent is used as the environments root (`--env-dir`), and `--code-dir`
+defaults to `/etc/puppetlabs/code` for global modules and shared data. A
+full code tree instead takes the env name and looks under
+`environments/<env>`:
+
+```
+# self-environment checkouts (env = directory name)
+/etc/puppetlabs/code/dev_environments/sam_ardctest_default
+/etc/puppetlabs/code/dev_environments/sam_rctest_default
+# a full code tree
+/srv/puppet-autofix/control-repo   production
+```
+
+These should be deployed automation clones (modules resolved into
+`modules/`, or present in the global modules dir), used only by this
+job, since each run hard-resets them to the Gerrit branch tip. Try a
+single environment first:
+
+```
+hiera-gc-autofix.sh --dry-run /etc/puppetlabs/code/dev_environments/sam_ardctest_default
+hiera-gc-autofix.sh --no-push /etc/puppetlabs/code/dev_environments/sam_ardctest_default
+```
+
+`--dry-run` reports what would change and makes no edits; `--no-push`
+applies and commits locally but does not push. A typical cron entry runs
+as the bot account whose ssh key reaches Gerrit:
+
+```
+17 6 * * *  /usr/local/bin/hiera-gc-autofix.sh --config /etc/hiera-gc-autofix/envs.conf --log-dir /var/log/hiera-gc-autofix
+```
+
+Because `unused` keys may be consumed by systems the analyser cannot
+see, supply an `--allowlist` (see
+`scripts/hiera-gc-autofix.allowlist.example`). Run
+`hiera-gc-autofix.sh --help` for all options.
+
 ## Development
 
 ```
