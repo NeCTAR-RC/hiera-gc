@@ -44,6 +44,16 @@ HIERA_GC="${HIERA_GC:-hiera-gc}"
 # Gerrit ssh username for `gerrit query` and the hook scp. Empty means derive
 # it from the gerrit remote URL, then gitreview.username.
 GERRIT_USER="${HIERA_GC_AUTOFIX_GERRIT_USER:-}"
+# Install each environment's Puppetfile modules before analysis so hiera-gc
+# sees the real consumers. 1 = on, 0 = off. The command is run with the
+# environment as its working directory.
+PUPPETFILE_INSTALL="${HIERA_GC_AUTOFIX_PUPPETFILE_INSTALL:-1}"
+PUPPETFILE_CMD="${HIERA_GC_AUTOFIX_PUPPETFILE_CMD:-r10k puppetfile install}"
+# Optional r10k config file (r10k.yaml). Set it in the config file
+# (r10k_config = /path/to/r10k.yaml), with --r10k-config, or this env var.
+# When set it is passed to r10k as a global option: r10k --config <file> ...
+R10K_CONFIG="${HIERA_GC_AUTOFIX_R10K_CONFIG:-}"
+R10K_CONFIG_CLI=""
 LOCK_FILE="${HIERA_GC_AUTOFIX_LOCK:-/var/lock/hiera-gc-autofix.lock}"
 LOG_DIR="${HIERA_GC_AUTOFIX_LOG_DIR:-}"
 BOT_NAME="${BOT_NAME:-hiera-gc autofix}"
@@ -65,6 +75,7 @@ declare -a ENTRY_ENV=()
 declare -a ENTRY_CODE=()
 declare -a RESULTS=()
 declare -a HG_CMD=()
+declare -a PF_CMD=()
 OVERALL_RC=0
 CUR_ENV="main"
 ENTRY_STATE=""
@@ -111,6 +122,9 @@ Options:
   --max-removals N    Skip an environment if a run would change more than N items (0 = no cap)
   --hiera-gc CMD      How to invoke hiera-gc (default 'hiera-gc'; e.g. 'python3 -m hiera_gc')
   --gerrit-user NAME  Gerrit ssh username (default: from the gerrit remote URL / gitreview.username)
+  --puppetfile-cmd CMD  Command to install an env's Puppetfile modules (default 'r10k puppetfile install')
+  --no-puppetfile-install  Do not install Puppetfile modules; analyse the modules already present
+  --r10k-config FILE  r10k config file (r10k.yaml), passed as 'r10k --config FILE ...'
   --lock FILE         Lock file for the self-overlap guard (default /var/lock/hiera-gc-autofix.lock)
   --log-dir DIR       Also append logs to DIR/hiera-gc-autofix-YYYYMMDD.log
   --dry-run           Refresh and analyse, report what would change, make no edits or pushes
@@ -146,6 +160,11 @@ parse_args() {
       --hiera-gc=*) HIERA_GC="${1#*=}"; shift ;;
       --gerrit-user) GERRIT_USER="${2:-}"; shift 2 ;;
       --gerrit-user=*) GERRIT_USER="${1#*=}"; shift ;;
+      --puppetfile-cmd) PUPPETFILE_CMD="${2:-}"; shift 2 ;;
+      --puppetfile-cmd=*) PUPPETFILE_CMD="${1#*=}"; shift ;;
+      --no-puppetfile-install) PUPPETFILE_INSTALL=0; shift ;;
+      --r10k-config) R10K_CONFIG_CLI="${2:-}"; shift 2 ;;
+      --r10k-config=*) R10K_CONFIG_CLI="${1#*=}"; shift ;;
       --lock) LOCK_FILE="${2:-}"; shift 2 ;;
       --lock=*) LOCK_FILE="${1#*=}"; shift ;;
       --log-dir) LOG_DIR="${2:-}"; shift 2 ;;
@@ -174,6 +193,8 @@ setup() {
   # Split the hiera-gc command into words so 'python3 -m hiera_gc' works.
   IFS=' ' read -r -a HG_CMD <<<"$HIERA_GC"
   [ "${#HG_CMD[@]}" -gt 0 ] || die "empty --hiera-gc command"
+  IFS=' ' read -r -a PF_CMD <<<"$PUPPETFILE_CMD"
+  [ "${#PF_CMD[@]}" -gt 0 ] || die "empty --puppetfile-cmd command"
   TMPDIR_RUN="$(mktemp -d "${TMPDIR:-/tmp}/hiera-gc-autofix.XXXXXX")" || die "mktemp failed"
   # shellcheck disable=SC2064
   trap "rm -rf '$TMPDIR_RUN'" EXIT
@@ -215,9 +236,21 @@ load_entries() {
     warn "config file not found: $CONFIG"
     return 0
   fi
-  local line repo env code_dir
+  local line repo env code_dir key val
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
+    # A "key = value" / "key=value" line (key is a bare word) is a global
+    # setting, not an environment entry. Environment entries are paths.
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_-]*)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      val="${val%"${val##*[![:space:]]}"}"   # trim trailing whitespace
+      case "$key" in
+        r10k_config|r10k-config) R10K_CONFIG="$val" ;;
+        *) warn "config: unknown setting '$key', ignoring" ;;
+      esac
+      continue
+    fi
     repo=""; env=""; code_dir=""
     IFS=$' \t' read -r repo env code_dir _ <<<"$line" || true
     [ -n "$repo" ] || continue
@@ -327,6 +360,31 @@ deployment_ok() {
   return 0
 }
 
+# Install the environment's Puppetfile modules so they match the Puppetfile
+# (right modules, right versions) before analysis. Without this hiera-gc may
+# not see a key's consumer and would wrongly mark the key unused. A no-op when
+# the environment has no Puppetfile or installs are disabled. The command runs
+# with the environment as its working directory. When R10K_CONFIG is set it is
+# passed as a global option (r10k --config FILE puppetfile install).
+ensure_modules() {
+  local envroot="$1" out ln
+  local -a cmd
+  [ "$PUPPETFILE_INSTALL" -eq 1 ] || return 0
+  [ -f "$envroot/Puppetfile" ] || return 0
+  cmd=( "${PF_CMD[@]}" )
+  if [ -n "$R10K_CONFIG" ]; then
+    cmd=( "${PF_CMD[0]}" --config "$R10K_CONFIG" "${PF_CMD[@]:1}" )
+  fi
+  out="$(mktemp "$TMPDIR_RUN/puppetfile.XXXXXX")"
+  log "installing Puppetfile modules: ${cmd[*]} (in $envroot)"
+  if ( cd "$envroot" && "${cmd[@]}" ) >"$out" 2>&1; then
+    return 0
+  fi
+  err "Puppetfile install failed:"
+  while IFS= read -r ln; do err "  $ln"; done < <(tail -n 20 "$out")
+  return 1
+}
+
 # Read the Change-Ids from a gerrit query JSON blob. gerrit query --format=JSON
 # prints one object per matching change (with an "id" Change-Id field and no
 # "type" key), then a trailing summary row with "type":"stats". So we collect
@@ -431,31 +489,10 @@ else:
 ' "$1" "$2" "$3" "$4"
 }
 
-# Print the realpath of every file hiera-gc recorded changing in the report.
-report_files() {
-  python3 -c '
-import sys, json, os
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception:
-    raise SystemExit(0)
-for a in (d.get("fixes") or {}).get("actions") or []:
-    f = a.get("file")
-    if f:
-        print(os.path.realpath(f))
-' "$1"
-}
-
-# Reconcile the working-tree changes against the fix report: every changed
-# path must be one the report says hiera-gc touched. Prints the changed files
-# (absolute) to stage, one per line. Returns non-zero if anything changed that
-# the report did not account for (reported on stderr as UNEXPECTED:<path>).
-reconcile_changes() {
-  local root="$1" report="$2" line path abs rc=0 f
-  declare -A want=()
-  while IFS= read -r f; do
-    [ -n "$f" ] && want["$f"]=1
-  done < <(report_files "$report")
+# Emit the changed paths (relative to the repo root) from git status, handling
+# renames and quoted names.
+porcelain_paths() {
+  local root="$1" line path
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     path="${line:3}"
@@ -463,15 +500,32 @@ reconcile_changes() {
       *" -> "*) path="${path##* -> }" ;;
     esac
     path="${path#\"}"; path="${path%\"}"
-    abs="$(realpath -m "$root/$path")"
-    if [ -z "${want[$abs]:-}" ]; then
-      printf 'UNEXPECTED:%s\n' "$path" >&2
-      rc=1
-    else
-      printf '%s\n' "$root/$path"
-    fi
+    printf '%s\n' "$path"
   done < <(git -C "$root" status --porcelain)
-  return "$rc"
+}
+
+# Read changed paths (relative to the repo root) on stdin and print only those
+# the fix report says hiera-gc changed. Everything else in the work tree, such
+# as modules installed by the Puppetfile step, is deployment noise and is
+# deliberately dropped, so it is never staged or committed.
+select_changed_in_report() {
+  python3 -c '
+import sys, os, json
+root, report = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(report))
+except Exception:
+    d = {}
+want = set()
+for a in (d.get("fixes") or {}).get("actions") or []:
+    f = a.get("file")
+    if f:
+        want.add(os.path.realpath(f))
+for raw in sys.stdin:
+    p = raw.rstrip("\n")
+    if p and os.path.realpath(os.path.join(root, p)) in want:
+        print(p)
+' "$1" "$2"
 }
 
 # Restore a checkout to the clean branch tip after a refused/aborted attempt.
@@ -491,7 +545,7 @@ process_env() {
   local repo="$1" env_opt="$2" code_dir_opt="$3"
   local repo_root host port project defaultbranch branch gerrit_remote
   local env code_dir envroot ssh_target ssh_port
-  local report msgfile changed nactions files_out
+  local report msgfile nactions ln
   local raw reuse_id ids_raw idcount got
   local -a ids=() discover_args=() to_add=()
 
@@ -535,14 +589,14 @@ process_env() {
   esac
   CUR_ENV="$env"
 
-  # Deployment gate: refuse a blind tree before doing anything else.
-  if ! deployment_ok "$envroot" "$code_dir"; then
-    err "no modules visible for $envroot; refusing to fix a blind tree"; return 1
-  fi
-
-  # Dry-run short-circuit: analyse the current tree and report. No git
-  # mutation, no network, so it is safe to run against a working checkout.
+  # Dry-run short-circuit: analyse the modules currently on disk and report. No
+  # git mutation, no network and no module install, so it is safe to run
+  # against a working checkout. (A real run installs the Puppetfile modules
+  # first; in dry-run we report on what is already deployed.)
   if [ "$DRY_RUN" -eq 1 ]; then
+    if ! deployment_ok "$envroot" "$code_dir"; then
+      err "no modules visible for $envroot; refusing to analyse a blind tree"; return 1
+    fi
     report="$TMPDIR_RUN/report-$env.json"
     local -a dry_args=( "${discover_args[@]}" --fix --fix-kinds "$FIX_KINDS"
                         --fail-on none --format json --output "$report" --dry-run )
@@ -612,7 +666,26 @@ process_env() {
   fi
   git -C "$repo_root" clean -fd --quiet || { err "git clean failed"; return 1; }
 
-  # 7. Apply the fix (the deployment gate already ran after step 1).
+  # 6. Install the env's Puppetfile modules so hiera-gc sees the real
+  # consumers. The install may also change committed (tracked) files: r10k
+  # purges moduledir content not in the Puppetfile, which deletes local modules
+  # that live in the env's own git tree. Restore any tracked file the install
+  # removed or modified, so the env's own modules are preserved and stay
+  # visible to the analysis, while keeping the install's untracked modules.
+  # This also leaves no unstaged tracked changes, which git review requires.
+  if ! ensure_modules "$envroot"; then
+    err "could not install Puppetfile modules; skipping (analysis would be blind)"
+    restore_tree "$repo_root" "$gerrit_remote/$branch"
+    return 1
+  fi
+  git -C "$repo_root" checkout -- . >/dev/null 2>&1 || true
+  if ! deployment_ok "$envroot" "$code_dir"; then
+    err "no modules visible for $envroot after install; refusing to fix a blind tree"
+    restore_tree "$repo_root" "$gerrit_remote/$branch"
+    return 1
+  fi
+
+  # 7. Apply the fix.
   report="$TMPDIR_RUN/report-$env.json"
   local -a fix_args=( "${discover_args[@]}" --fix --fix-kinds "$FIX_KINDS"
                       --fail-on none --format json --output "$report" )
@@ -625,40 +698,33 @@ process_env() {
     return 1
   fi
 
-  # 8. Anything to commit?
-  changed="$(git -C "$repo_root" status --porcelain)"
-  if [ -z "$changed" ]; then
-    log "no changes after fix; nothing to propose"
-    ENTRY_STATE="nochange"
-    return 0
-  fi
-
-  # 9. Integrity checks on the report.
+  # 8. Integrity and scope of the fix report.
   if ! json_errors_empty "$report"; then
     err "report records fix errors; aborting"
     restore_tree "$repo_root" "$gerrit_remote/$branch"
     return 1
   fi
   nactions="$(json_count_actions "$report")"
+  if [ "$nactions" -eq 0 ]; then
+    log "no Hiera data changes to propose"
+    ENTRY_STATE="nochange"
+    return 0
+  fi
   if [ "$MAX_REMOVALS" -gt 0 ] && [ "$nactions" -gt "$MAX_REMOVALS" ]; then
     err "would change $nactions item(s) > --max-removals $MAX_REMOVALS; skipping (possible blindness or drift)"
     restore_tree "$repo_root" "$gerrit_remote/$branch"
     return 1
   fi
 
-  # 10. Scope guard: every changed file must be one the report accounts for.
-  if ! files_out="$(reconcile_changes "$repo_root" "$report" 2>"$TMPDIR_RUN/recon-$env.err")"; then
-    err "hiera-gc changed files not present in its report; aborting:"
-    while IFS= read -r got; do err "  $got"; done < "$TMPDIR_RUN/recon-$env.err"
+  # 9. Stage exactly the files hiera-gc reported changing. Any other work-tree
+  # change (modules installed from the Puppetfile, or other noise) is ignored
+  # and never committed.
+  mapfile -t to_add < <(porcelain_paths "$repo_root" | select_changed_in_report "$repo_root" "$report")
+  if [ "${#to_add[@]}" -eq 0 ]; then
+    err "hiera-gc reported $nactions change(s) but none are visible in the work tree; aborting"
     restore_tree "$repo_root" "$gerrit_remote/$branch"
     return 1
   fi
-  if [ -z "$files_out" ]; then
-    err "no stageable files reconciled from the report; aborting"
-    restore_tree "$repo_root" "$gerrit_remote/$branch"
-    return 1
-  fi
-  mapfile -t to_add <<<"$files_out"
 
   # 11. Find an existing open review (only now that we have a diff to push).
   #     A failed query is a hard stop, never a fall-through to a duplicate.
@@ -709,13 +775,27 @@ process_env() {
     fi
   fi
 
-  # 13. Stage exactly the files the report accounted for, then commit.
-  if ! git -C "$repo_root" add -- "${to_add[@]}"; then
-    err "git add failed"; restore_tree "$repo_root" "$gerrit_remote/$branch"; return 1
-  fi
-  if ! git -C "$repo_root" -c "user.name=$BOT_NAME" -c "user.email=$BOT_EMAIL" \
-        commit -s -q -F "$msgfile"; then
-    err "git commit failed"; restore_tree "$repo_root" "$gerrit_remote/$branch"; return 1
+  # 13. Stage exactly the files the report accounted for, then commit. A
+  # pre-commit hook on the env repo may rewrite the staged files for style and
+  # abort the commit; re-stage and retry a few times so those fixups are picked
+  # up. Re-staging only our own files keeps the commit scoped.
+  local commit_ok=0 attempt commit_out
+  for attempt in 1 2 3; do
+    if ! git -C "$repo_root" add -- "${to_add[@]}"; then
+      err "git add failed"; restore_tree "$repo_root" "$gerrit_remote/$branch"; return 1
+    fi
+    if commit_out="$(git -C "$repo_root" -c "user.name=$BOT_NAME" -c "user.email=$BOT_EMAIL" \
+          commit -s -F "$msgfile" 2>&1)"; then
+      commit_ok=1
+      break
+    fi
+    log "commit attempt $attempt did not succeed (a pre-commit hook may have rewritten files); retrying"
+  done
+  if [ "$commit_ok" -ne 1 ]; then
+    err "git commit failed after $attempt attempt(s):"
+    while IFS= read -r ln; do err "  $ln"; done <<<"$commit_out"
+    restore_tree "$repo_root" "$gerrit_remote/$branch"
+    return 1
   fi
 
   # 14. Verify exactly one Change-Id, and that a reuse kept the queried id.
@@ -744,8 +824,19 @@ process_env() {
     ENTRY_STATE="committed"
     return 0
   fi
-  if ! git -C "$repo_root" review -y -t "$TOPIC" "$branch" >/dev/null 2>&1; then
-    err "git review failed"
+  local review_out review_rc=0
+  review_out="$(git -C "$repo_root" review -y -t "$TOPIC" "$branch" 2>&1)" || review_rc=$?
+  if [ "$review_rc" -ne 0 ]; then
+    # Gerrit rejects a patchset identical to the current one with "no new
+    # changes"; for us that means the open review already reflects this exact
+    # cleanup, so there is nothing to do.
+    if printf '%s\n' "$review_out" | grep -qiE "no new changes|no changes made"; then
+      log "open review ${reuse_id:-} already reflects this cleanup (no new changes)"
+      ENTRY_STATE="uptodate"
+      return 0
+    fi
+    err "git review failed:"
+    while IFS= read -r ln; do err "  $ln"; done <<<"$review_out"
     return 1
   fi
   if [ -n "$reuse_id" ]; then
@@ -776,6 +867,8 @@ main() {
   setup
   acquire_lock
   load_entries
+  # An explicit --r10k-config wins over the config file's r10k_config setting.
+  [ -n "$R10K_CONFIG_CLI" ] && R10K_CONFIG="$R10K_CONFIG_CLI"
   if [ "${#ENTRY_REPO[@]}" -eq 0 ]; then
     log "no environments to process; nothing to do"
     exit 0

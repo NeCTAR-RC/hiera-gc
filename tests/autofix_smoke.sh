@@ -30,6 +30,7 @@ SHIM="$WORK/shim"
 BARE="$WORK/$HOST/bare.git"
 REPO="$WORK/repo"
 GITREVIEW_LOG="$WORK/git-review.log"
+R10K_LOG="$WORK/r10k.log"
 mkdir -p "$SHIM" "$WORK/$HOST"
 
 FAILURES=0
@@ -78,6 +79,16 @@ if [ "${1:-}" = "-s" ]; then
   exit 0
 fi
 printf 'PUSH %s\n' "$*" >> "$GITREVIEW_LOG"
+# FAKE_REVIEW_NONEW=1 simulates Gerrit rejecting an identical patchset.
+if [ "${FAKE_REVIEW_NONEW:-0}" = "1" ]; then
+  echo "remote: error: no new changes" >&2
+  exit 1
+fi
+# FAKE_REVIEW_FAIL=<msg> simulates any other push failure.
+if [ -n "${FAKE_REVIEW_FAIL:-}" ]; then
+  echo "$FAKE_REVIEW_FAIL" >&2
+  exit 1
+fi
 exit 0
 EOF
 
@@ -124,8 +135,26 @@ fi
 exit 0
 EOF
 
+# Fake `r10k puppetfile install`. Records the call (with its cwd) and simulates
+# installing a module into ./modules. FAKE_R10K_FAIL=1 makes it fail.
+cat > "$SHIM/r10k" <<'EOF'
+#!/usr/bin/env bash
+printf 'R10K %s (cwd=%s)\n' "$*" "$PWD" >> "$R10K_LOG"
+if [ "${FAKE_R10K_FAIL:-0}" = "1" ]; then
+  echo "r10k: failed to resolve module" >&2
+  exit 1
+fi
+# Purge a committed local module not in the Puppetfile (as r10k does), and
+# install an external module as untracked files. The script must restore the
+# purged committed module and ignore the untracked one.
+rm -rf "$PWD/modules/local_site"
+mkdir -p "$PWD/modules/installed_by_r10k/manifests"
+echo "# installed by r10k" > "$PWD/modules/installed_by_r10k/manifests/init.pp"
+exit 0
+EOF
+
 chmod +x "$SHIM"/*
-export GITREVIEW_LOG
+export GITREVIEW_LOG R10K_LOG
 
 # Gerrit commit-msg hook: mint a Change-Id when none is present (like Gerrit).
 HOOK_SRC="$WORK/commit-msg"
@@ -175,6 +204,7 @@ TARGET="$REPO:production" # entry argument passed to the script
 
 run_script() {
   : > "$GITREVIEW_LOG"
+  : > "$R10K_LOG"
   PATH="$SHIM:$PATH" \
     bash "$SCRIPT" \
       --hiera-gc "$SHIM/hiera-gc" \
@@ -276,7 +306,7 @@ fi
 ENVPARENT="$WORK/dev_environments"
 ENVCHK="$ENVPARENT/myenv"
 ENVBARE="$WORK/$HOST/myenv-bare.git"
-mkdir -p "$ENVCHK/data" "$ENVCHK/modules/mymod" "$ENVPARENT"
+mkdir -p "$ENVCHK/data" "$ENVPARENT"
 git init -q --bare "$ENVBARE"
 git init -q -b master "$ENVCHK"
 cat > "$ENVCHK/hiera.yaml" <<'EOF'
@@ -291,6 +321,10 @@ hierarchy:
 EOF
 printf 'live_key: keep me\ndead_key: remove me\n' > "$ENVCHK/data/common.yaml"
 printf "mod 'mymod'\n" > "$ENVCHK/Puppetfile"
+# A local module committed in the env's own tree, under modules/, not in the
+# Puppetfile (the install will purge it; the script must restore it).
+mkdir -p "$ENVCHK/modules/local_site/manifests"
+echo "class local_site {}" > "$ENVCHK/modules/local_site/manifests/init.pp"
 cat > "$ENVCHK/.gitreview" <<EOF
 [gerrit]
 host=$HOST
@@ -304,6 +338,19 @@ git -C "$ENVCHK" remote add gerrit "$ENVBARE"
 git -C "$ENVCHK" push -q gerrit master
 cp "$HOOK_SRC" "$ENVCHK/.git/hooks/commit-msg"
 chmod +x "$ENVCHK/.git/hooks/commit-msg"
+# A pre-commit hook that rewrites a staged file for "style" and aborts the
+# first commit (only when FAKE_PRECOMMIT=1), like real pre-commit fixers.
+cat > "$ENVCHK/.git/hooks/pre-commit" <<'EOF'
+#!/usr/bin/env bash
+[ "${FAKE_PRECOMMIT:-0}" = "1" ] || exit 0
+f="data/common.yaml"
+[ -f "$f" ] || exit 0
+grep -q '^# style-ok$' "$f" && exit 0
+echo '# style-ok' >> "$f"
+echo "pre-commit: normalised $f" >&2
+exit 1
+EOF
+chmod +x "$ENVCHK/.git/hooks/pre-commit"
 
 REPOCUR="$ENVCHK"; ENVLABEL="myenv"; TARGET="$ENVCHK"
 rc=$(FAKE_OPEN_IDS="" FAKE_HG_MODE="edit" run_script)
@@ -332,6 +379,103 @@ if [ "$relpath_ok" = "1" ] && [ "$noenv_ok" = "1" ]; then
   pass "commit message omits the environment name and uses env-relative paths"
 else
   fail "case-A message: subj='$subj' relpath_ok=$relpath_ok noenv_ok=$noenv_ok"
+fi
+
+# Scenario 9: the real run installs the env's Puppetfile modules first (the
+# scenario 7 run above had a Puppetfile, so r10k should have been invoked in
+# the env directory).
+if grep -q 'puppetfile install' "$R10K_LOG" && grep -qF "cwd=$ENVCHK" "$R10K_LOG"; then
+  pass "Puppetfile modules are installed (r10k puppetfile install) in the env before fixing"
+else
+  fail "puppetfile install: R10K_LOG=$(cat "$R10K_LOG")"
+fi
+
+# Scenario 10: the commit contains only the Hiera data change, never the
+# (untracked) modules r10k installed. This is the work-tree-noise case that
+# previously aborted the run.
+commit_files="$(git -C "$ENVCHK" show --name-only --format= HEAD | grep -v '^$' || true)"
+if printf '%s\n' "$commit_files" | grep -qx 'data/common.yaml' \
+   && ! printf '%s\n' "$commit_files" | grep -q '^modules/'; then
+  pass "commit contains only Hiera data, not Puppetfile-installed modules"
+else
+  fail "commit contents (expected only data/common.yaml): [$commit_files]"
+fi
+
+# Scenario 11: a committed local module that the install purged is restored, so
+# it stays in the env (visible to the analysis) and is never committed as a
+# deletion.
+if [ -f "$ENVCHK/modules/local_site/manifests/init.pp" ] \
+   && ! printf '%s\n' "$commit_files" | grep -q 'local_site'; then
+  pass "a committed local module purged by the install is restored, not committed as a deletion"
+else
+  fail "committed module local_site not restored (present=$([ -f "$ENVCHK/modules/local_site/manifests/init.pp" ] && echo yes || echo no))"
+fi
+
+# --------------------------------------------------------------------------
+# Scenario 12: a failed Puppetfile install skips the environment rather than
+# fixing a blind tree, and pushes nothing.
+# --------------------------------------------------------------------------
+REPOCUR="$ENVCHK"; ENVLABEL="myenv"; TARGET="$ENVCHK"
+rc=$(FAKE_OPEN_IDS="" FAKE_HG_MODE="edit" FAKE_R10K_FAIL=1 run_script)
+if [ "$rc" = "1" ] && state_line | grep -q "myenv = failed" && ! pushed && head_is_tip; then
+  pass "a failed Puppetfile install skips the environment without pushing"
+else
+  fail "puppetfile-fail: rc=$rc state='$(state_line)' pushed=$(pushed && echo yes || echo no) head_is_tip=$(head_is_tip && echo yes || echo no)"
+fi
+
+# --------------------------------------------------------------------------
+# Scenario 13: an identical patchset (Gerrit "no new changes") is treated as
+# up to date, not a failure.
+# --------------------------------------------------------------------------
+REPOCUR="$REPO"; ENVLABEL="production"; TARGET="$REPO:production"
+rc=$(FAKE_OPEN_IDS="$REUSE" FAKE_HG_MODE="edit" FAKE_REVIEW_NONEW=1 run_script)
+if [ "$rc" = "0" ] && state_line | grep -q "production = uptodate"; then
+  pass "an identical patchset (no new changes) is treated as up to date"
+else
+  fail "no-new-changes: rc=$rc state='$(state_line)'"
+fi
+
+# --------------------------------------------------------------------------
+# Scenario 14: any other git review failure surfaces the underlying error and
+# fails the environment.
+# --------------------------------------------------------------------------
+rc=$(FAKE_OPEN_IDS="" FAKE_HG_MODE="edit" FAKE_REVIEW_FAIL="remote: error: prohibited by Gerrit: not permitted" run_script)
+if [ "$rc" = "1" ] && state_line | grep -q "production = failed" && grep -q "prohibited by Gerrit" "$LOG"; then
+  pass "git review failures surface the underlying Gerrit error"
+else
+  fail "review-fail: rc=$rc state='$(state_line)' (log should contain the Gerrit error)"
+fi
+
+# --------------------------------------------------------------------------
+# Scenario 15: an r10k_config setting in the config file is passed to r10k as a
+# global --config option.
+# --------------------------------------------------------------------------
+R10K_YAML="$WORK/r10k.yaml"
+echo "cachedir: /tmp/r10k" > "$R10K_YAML"
+CONF="$WORK/envs.conf"
+printf 'r10k_config = %s\n%s\n' "$R10K_YAML" "$ENVCHK" > "$CONF"
+: > "$R10K_LOG"; : > "$GITREVIEW_LOG"
+PATH="$SHIM:$PATH" bash "$SCRIPT" \
+  --hiera-gc "$SHIM/hiera-gc" --lock "$WORK/lock" --topic "$TOPIC" \
+  --code-dir-default "$WORK/globalcode" --config "$CONF" >"$LOG" 2>&1
+if grep -qF -- "--config $R10K_YAML" "$R10K_LOG"; then
+  pass "r10k_config from the config file is passed to r10k as --config"
+else
+  fail "r10k-config: r10k was not called with --config $R10K_YAML; R10K_LOG=$(cat "$R10K_LOG")"
+fi
+
+# --------------------------------------------------------------------------
+# Scenario 16: a pre-commit hook that rewrites staged files (and aborts the
+# first commit) is retried, and the hook's fixup is included in the commit.
+# --------------------------------------------------------------------------
+REPOCUR="$ENVCHK"; ENVLABEL="myenv"; TARGET="$ENVCHK"
+rc=$(FAKE_OPEN_IDS="" FAKE_HG_MODE="edit" FAKE_PRECOMMIT=1 run_script)
+committed_data="$(git -C "$ENVCHK" show HEAD:data/common.yaml 2>/dev/null || true)"
+if [ "$rc" = "0" ] && state_line | grep -q "myenv = created" && pushed \
+   && printf '%s\n' "$committed_data" | grep -q '^# style-ok$'; then
+  pass "a pre-commit hook that rewrites files is retried and its fixup committed"
+else
+  fail "pre-commit retry: rc=$rc state='$(state_line)' pushed=$(pushed && echo yes || echo no) data=[$committed_data]"
 fi
 
 # --------------------------------------------------------------------------

@@ -176,12 +176,31 @@ The commit message is value-free and carries no environment name (the
 repo it lands in identifies the environment); file paths are shown
 relative to the environment root.
 
+Before analysing an environment that has a `Puppetfile`, it installs the
+modules that Puppetfile declares (by default `r10k puppetfile install`,
+run in the environment), so the modules are present and at the right
+version and hiera-gc can see every consumer. The install command is
+configurable (`--puppetfile-cmd`) and can be turned off
+(`--no-puppetfile-install`). Modules it installs are never staged into
+the commit (the script commits only the files hiera-gc reports
+changing), so the managed module directory does not need to be
+gitignored. If the install purges a local module committed in the
+environment's own tree (r10k removes moduledir content not in the
+Puppetfile), the script restores it, so the environment's own modules
+are preserved and stay visible to the analysis. `--dry-run` skips this
+install and analyses the modules already on disk. To point r10k at a
+specific `r10k.yaml`, set `r10k_config = /path/to/r10k.yaml` in the
+config file (or pass `--r10k-config`); it is passed as `r10k --config
+<file> puppetfile install`.
+
 It pushes for review only and never approves or submits, so the human
 plus catalog-diff review described above stays the gate before anything
 merges. Other guard rails: it refuses to fix a checkout whose modules
 are not deployed (a blind analysis would delete live data), stages only
-the files `--fix` changed, and isolates its own reviews by topic and a
-marker trailer so it coexists with other tooling on the same repos.
+the files `--fix` changed, retries the commit when the environment's
+`pre-commit` hook rewrites files for style, and isolates its own reviews
+by topic and a marker trailer so it coexists with other tooling on the
+same repos.
 
 List the environments in a config file (see
 `scripts/hiera-gc-autofix.conf.example`), one per line. The script
